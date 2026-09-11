@@ -36,7 +36,7 @@ CRC 计算范围：FRAME_HEADER + DATA
 import serial
 import time
 
-FRAME_HEADER = b'\x5A\xA5'
+FRAME_HEADER = b'\x55\xAA'
 FRAME_TAIL = b'\x3C\x3E'
 DATA_LEN = 16
 
