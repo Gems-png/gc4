@@ -2,6 +2,16 @@ import os
 os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'  # 必须在 import cv2 之前，压制 QUIRC 警告
 import cv2
 
+# 改成你自己的串口
+#PORT = 'COM3'          # Windows 示例
+PORT = '/dev/ttyUSB0'  # Linux 示例
+BAUDRATE = 115200
+FRAME_HEADER = b'\x55\xAA'
+FRAME_TAIL = b'\x3C\x3E'
+DATA_LEN = 12
+
+
+
 def detect_qrcode(frame, detector, clahe):
     """
     检测一帧图像中的二维码，返回解码文本。
@@ -25,7 +35,7 @@ def detect_qrcode(frame, detector, clahe):
 """
 自定义帧协议：
 FRAME_HEADER  2 字节   0x5A 0xA5
-DATA          16 字节  ASCII 数字，例如 b"1234123412341234"
+DATA          12 字节  ASCII 数字，例如 b"123123123123"
 CRC16         2 字节   CRC16/MODBUS，低字节在前
 FRAME_TAIL    2 字节   0x3C 0x3E
 
@@ -36,9 +46,6 @@ CRC 计算范围：FRAME_HEADER + DATA
 import serial
 import time
 
-FRAME_HEADER = b'\x55\xAA'
-FRAME_TAIL = b'\x3C\x3E'
-DATA_LEN = 16
 
 
 # ---------------------------------------------------------------
@@ -61,7 +68,7 @@ def crc16_modbus(data: bytes) -> int:
 # ---------------------------------------------------------------
 def build_frame(data: str) -> bytes:
     """
-    把 16 位 ASCII 数字打包成完整帧。
+    把 12 位 ASCII 数字打包成完整帧。
     """
     data = data.replace("+", "")
     data_bytes = data.encode('ascii')
@@ -104,7 +111,7 @@ def open_serial(port: str,
 # ---------------------------------------------------------------
 def send_to_serial(data: str, ser: serial.Serial) -> bytes:
     """
-    把 data（16 位数字字符串）打包成帧，通过串口发送。
+    把 data（12 位数字字符串）打包成帧，通过串口发送。
     返回实际发出的字节。
     """
     frame = build_frame(data)
@@ -113,10 +120,6 @@ def send_to_serial(data: str, ser: serial.Serial) -> bytes:
     return frame
 
 def main():
-    # 改成你自己的串口
-    PORT = 'COM3'          # Windows 示例
-    # PORT = '/dev/ttyUSB0'  # Linux 示例
-    BAUDRATE = 115200
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
