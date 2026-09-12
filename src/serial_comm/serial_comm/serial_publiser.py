@@ -57,7 +57,7 @@ class SerialPublisher(Node):
         # --- 订阅 /plate_status ---
         self.sub_plate = self.create_subscription(
             Float32,
-            '/plate_status',
+            '/plate_cmd',
             self.plate_callback,
             10
         )
@@ -79,7 +79,7 @@ class SerialPublisher(Node):
         self.create_timer(0.01, self.read_serial)  # 每10ms轮询一次串口读取
 
         # 例如发布真实关节状态
-        self.pub_real_joint = self.create_publisher(JointState, '/command_joint_states', 10)
+        self.pub_real_joint = self.create_publisher(JointState, '/real_joint_states', 10)
         self.pub_real_gripper = self.create_publisher(Bool, '/real_gripper_status', 10)
         self.pub_real_plate = self.create_publisher(Float32, '/real_plate_status', 10)
 
@@ -209,11 +209,11 @@ class SerialPublisher(Node):
             # 移除已处理帧
             self.rx_buffer = self.rx_buffer[frame_end:]
 
-            # 解析该帧
+            # 解析该帧, 并发布
             self.parse_frame(frame)
 
     def parse_frame(self, frame):
-        """解析单帧：验证CRC，提取浮点数列表，并发布"""
+        """解析单帧: 验证CRC, 提取浮点数列表, 并发布"""
         try:
             # 校验头部和尾部
             if not frame.startswith(FRAME_HEADER) or not frame.endswith(FRAME_TAIL):

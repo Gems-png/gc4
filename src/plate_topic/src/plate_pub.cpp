@@ -10,7 +10,7 @@ public:
   platePub() : Node("platePub")
   {
     // 1. 创建发布者（反馈状态）
-    status_publisher_ = this->create_publisher<std_msgs::msg::Float32>("plate_status", 10);
+    status_publisher_ = this->create_publisher<std_msgs::msg::Float32>("plate_cmd", 10);
 
     // 2. 创建订阅者（接收指令）
     cmd_subscription_ = this->create_subscription<std_msgs::msg::Float32>(
