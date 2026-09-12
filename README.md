@@ -25,6 +25,10 @@ complete 收到grab反馈
 要根据记忆调用plate，转来空盘
 然后completeflow发布关节角度话题和gripper话题
 
+数据链三，手眼标定：
+HECal
+1.从下危机得到的关节角度，正运动学得到坐标
+
 
 
 
