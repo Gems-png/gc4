@@ -14,7 +14,7 @@ complete_flow节点订阅tag_recognize_topic(其他测试节点接受传入参�
 位置传入my_ik,得到机械臂电机角度
 serial_comm 发给下危机
 
-grab根据serial返回的角度值偏差判断到位没有
+grab根据订阅joint_states和real_joint_states的偏差判断到位没有，进行反馈
 到位后，发送下降，闭合夹爪等任务
 一样判断到位没有，然后返回
 
@@ -26,8 +26,11 @@ complete 收到grab反馈
 然后completeflow发布关节角度话题和gripper话题
 
 数据链三，手眼标定：
-HECal
-1.从下危机得到的关节角度，正运动学得到坐标
+serial得到电机坐标发布在real_joint_states
+然后myfk正运动学得到末端位姿
+HECal会识别出标定版的位姿，然后订阅末端位姿
+进行手眼标定，然后保存
+
 
 
 
