@@ -81,7 +81,7 @@ def generate_launch_description():
                                    description='要跟踪的 AprilTag ID <0 表示跟踪最大那个'),
 
           # ---- 图像来源 ----
-          Node(package='cv', executable='tag_image_pub', name='tag_image_pub',
+          Node(package='cv', executable='Apriltag_image_pub', name='tag_image_pub',
                condition=IfCondition(PythonExpression(["'", use_sim, "' == 'true'"])),
                output='screen'),
           # 原自定义 raw_image_pub 节点，现替换为 ROS2 官方 usb_cam 节点（保留原代码作为注释）
@@ -109,7 +109,7 @@ def generate_launch_description():
                output='screen'),
 
           # ---- tag 检测 -> 相似三角形测距 -> 发布 /goal_position ----
-          Node(package='cv', executable='cam_pos', name='cam_pos',
+          Node(package='cv', executable='Apriltag_pose', name='cam_pos',
                parameters=[{
                     'calib_file': calib_file,
                     'tag_size_mm': tag_size,
