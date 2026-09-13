@@ -27,7 +27,7 @@ class RawImagePublisher(Node):
 
         self.cap = cv2.VideoCapture(camera_id)
         if not self.cap.isOpened():
-            self.get_logger().error(f'无法打开摄像头 {camera_id}')
+            self.get_logger().error(f'无法打开apriltag摄像头 {camera_id}')
             raise RuntimeError('摄像头打开失败')
 
         # ----- 关键修改：强制使用 MJPG -----
