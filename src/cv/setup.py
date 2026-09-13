@@ -28,9 +28,9 @@ setup(
     entry_points={
         'console_scripts': [
             "raw_image_pub=cv.raw_image_pub:main",
-            "tag_pose=cv.tag_pose:main",
+            "tag_pose=cv.Apriltag_pose:main",
             "cam_pos=cv.cam_pos:main",
-            "tag_image_pub=cv.tag_image_pub:main",
+            "tag_image_pub=cv.Apriltag_image_pub:main",
         ],
     },
 )
