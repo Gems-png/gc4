@@ -2,14 +2,25 @@ import os
 os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'  # 必须在 import cv2 之前，压制 QUIRC 警告
 import cv2
 
+import serial
+import time
+
 # 改成你自己的串口
 #PORT = 'COM3'          # Windows 示例
 PORT = '/dev/ttyUSB0'  # Linux 示例
 BAUDRATE = 115200
-FRAME_HEADER = b'\x55\xAA'
-FRAME_TAIL = b'\x3C\x3E'
-DATA_LEN = 12
 
+# ---------------------------------------------------------------
+# AA55 统一协议（详见 USART1_Protocol.md）
+#
+#   帧头 2B   类型 1B   长度 1B   数据 N B
+#   0xAA 0x55   type     length   payload
+#
+#   总长 = 4 + length，全部小端，无 CRC、无帧尾
+# ---------------------------------------------------------------
+FRAME_HEADER = b'\xAA\x55'
+TYPE_TAG = 0x03     # Tag 数据（上→下）
+DATA_LEN = 12       # 0x03 数据段固定 12 字节 ASCII 数字
 
 
 def detect_qrcode(frame, detector, clahe):
@@ -31,44 +42,16 @@ def detect_qrcode(frame, detector, clahe):
         pass
     return None
 
-# -*- coding: utf-8 -*-
-"""
-自定义帧协议：
-FRAME_HEADER  2 字节   0x5A 0xA5
-DATA          12 字节  ASCII 数字，例如 b"123123123123"
-CRC16         2 字节   CRC16/MODBUS，低字节在前
-FRAME_TAIL    2 字节   0x3C 0x3E
-
-CRC 计算范围：FRAME_HEADER + DATA
-整帧固定长度：22 字节
-"""
-
-import serial
-import time
-
-
-
-# ---------------------------------------------------------------
-# CRC16/MODBUS
-# ---------------------------------------------------------------
-def crc16_modbus(data: bytes) -> int:
-    crc = 0xFFFF
-    for b in data:
-        crc ^= b
-        for _ in range(8):
-            if crc & 0x0001:
-                crc = (crc >> 1) ^ 0xA001
-            else:
-                crc >>= 1
-    return crc & 0xFFFF
-
 
 # ---------------------------------------------------------------
 # 打包
 # ---------------------------------------------------------------
 def build_frame(data: str) -> bytes:
     """
-    把 12 位 ASCII 数字打包成完整帧。
+    把 12 位 ASCII 数字打包成 0x03 Tag 数据帧。
+
+    数据段：4 组 × 3 位，如 "123456789012"，共 12 字节。
+    整帧固定长度：4 + 12 = 16 字节。
     """
     data = data.replace("+", "")
     data_bytes = data.encode('ascii')
@@ -79,17 +62,15 @@ def build_frame(data: str) -> bytes:
     if not data_bytes.isdigit():
         raise ValueError("DATA 必须全部是数字 0-9")
 
-    crc = crc16_modbus(FRAME_HEADER + data_bytes)
-    crc_bytes = crc.to_bytes(2, byteorder='little')
-
-    return FRAME_HEADER + data_bytes + crc_bytes + FRAME_TAIL
+    # length 为数据段长度，本协议无 CRC、无帧尾
+    return FRAME_HEADER + bytes([TYPE_TAG, DATA_LEN]) + data_bytes
 
 
 # ---------------------------------------------------------------
 # 打开串口
 # ---------------------------------------------------------------
 def open_serial(port: str,
-                baudrate: int = 115200,
+                baudrate: int = BAUDRATE,
                 timeout: float = 1.0) -> serial.Serial:
     """
     打开串口。
@@ -111,13 +92,14 @@ def open_serial(port: str,
 # ---------------------------------------------------------------
 def send_to_serial(data: str, ser: serial.Serial) -> bytes:
     """
-    把 data（12 位数字字符串）打包成帧，通过串口发送。
+    把 data（12 位数字字符串）打包成 0x03 Tag 数据帧，通过串口发送。
     返回实际发出的字节。
     """
     frame = build_frame(data)
     ser.write(frame)
     ser.flush()
     return frame
+
 
 def main():
 
@@ -141,12 +123,12 @@ def main():
         if text:
             try:
                 with open_serial(PORT, BAUDRATE) as ser:
-                    for i in range(5):
+                    for _ in range(5):
                         send_to_serial(text, ser)
                         time.sleep(0.1)
                 cap.release()
                 cv2.destroyAllWindows()
-                return 
+                return
             except (ValueError, serial.SerialException) as e:
                 print(f"发送失败: {e}")
 
