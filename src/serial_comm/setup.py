@@ -24,7 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            "serial_publiser=serial_comm.serial_publiser:main",
+            "serial_driver=serial_comm.serial_driver:main",
+            "serial_bridge=serial_comm.serial_bridge:main",
         ],
     },
 )

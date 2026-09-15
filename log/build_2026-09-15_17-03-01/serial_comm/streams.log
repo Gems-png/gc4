@@ -1,0 +1,26 @@
+[0.300s] Invoking command in '/home/gems/gc4/src/serial_comm': PYTHONPATH=/home/gems/gc4/build/serial_comm/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/gems/gc4/install/serial_comm/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/serial_comm build --build-base /home/gems/gc4/build/serial_comm/build install --record /home/gems/gc4/build/serial_comm/install.log --install-scripts $base/lib/serial_comm --single-version-externally-managed install_data
+[0.412s] running egg_info
+[0.412s] writing ../../build/serial_comm/serial_comm.egg-info/PKG-INFO
+[0.412s] writing dependency_links to ../../build/serial_comm/serial_comm.egg-info/dependency_links.txt
+[0.412s] writing entry points to ../../build/serial_comm/serial_comm.egg-info/entry_points.txt
+[0.412s] writing requirements to ../../build/serial_comm/serial_comm.egg-info/requires.txt
+[0.412s] writing top-level names to ../../build/serial_comm/serial_comm.egg-info/top_level.txt
+[0.413s] reading manifest file '../../build/serial_comm/serial_comm.egg-info/SOURCES.txt'
+[0.413s] adding license file 'LICENSE'
+[0.413s] writing manifest file '../../build/serial_comm/serial_comm.egg-info/SOURCES.txt'
+[0.413s] running build
+[0.413s] running build_py
+[0.413s] copying serial_comm/serial_bridge.py -> /home/gems/gc4/build/serial_comm/build/lib/serial_comm
+[0.413s] running install
+[0.414s] running install_lib
+[0.414s] copying /home/gems/gc4/build/serial_comm/build/lib/serial_comm/serial_bridge.py -> /home/gems/gc4/install/serial_comm/lib/python3.10/site-packages/serial_comm
+[0.414s] byte-compiling /home/gems/gc4/install/serial_comm/lib/python3.10/site-packages/serial_comm/serial_bridge.py to serial_bridge.cpython-310.pyc
+[0.415s] running install_data
+[0.415s] running install_egg_info
+[0.416s] removing '/home/gems/gc4/install/serial_comm/lib/python3.10/site-packages/serial_comm-0.0.0-py3.10.egg-info' (and everything under it)
+[0.416s] Copying ../../build/serial_comm/serial_comm.egg-info to /home/gems/gc4/install/serial_comm/lib/python3.10/site-packages/serial_comm-0.0.0-py3.10.egg-info
+[0.416s] running install_scripts
+[0.429s] Installing serial_bridge script to /home/gems/gc4/install/serial_comm/lib/serial_comm
+[0.429s] Installing serial_driver script to /home/gems/gc4/install/serial_comm/lib/serial_comm
+[0.429s] writing list of installed files to '/home/gems/gc4/build/serial_comm/install.log'
+[0.440s] Invoked command in '/home/gems/gc4/src/serial_comm' returned '0': PYTHONPATH=/home/gems/gc4/build/serial_comm/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/gems/gc4/install/serial_comm/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/serial_comm build --build-base /home/gems/gc4/build/serial_comm/build install --record /home/gems/gc4/build/serial_comm/install.log --install-scripts $base/lib/serial_comm --single-version-externally-managed install_data

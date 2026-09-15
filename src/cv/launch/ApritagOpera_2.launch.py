@@ -91,11 +91,13 @@ def generate_launch_description():
                parameters=[{'l1': l1, 'l2': l2, 'l3': l3}],
                output='screen'),
 
-          # ---- 串口发送 ----
-          Node(package='serial_comm', executable='serial_publiser', name='serial_publiser',
+          # ---- 串口：driver 管字节，bridge 管协议 ----
+          Node(package='serial_comm', executable='serial_driver', name='serial_driver',
                parameters=[{
                     'simulate': serial_sim,
                     'port': port,          # 将端口参数传入，节点内部需要支持此参数
                }],
+               output='screen'),
+          Node(package='serial_comm', executable='serial_bridge', name='serial_bridge',
                output='screen'),
     ])

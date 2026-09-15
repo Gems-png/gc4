@@ -1,0 +1,4 @@
+[console_scripts]
+serial_bridge = serial_comm.serial_bridge:main
+serial_driver = serial_comm.serial_driver:main
+

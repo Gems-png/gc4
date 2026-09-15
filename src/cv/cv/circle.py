@@ -1,1 +1,1 @@
-# 识别装有tag任务的tag，发布到/cv/tag_recognize_topic
+# 识别位于地面的黑色的同心圆形
