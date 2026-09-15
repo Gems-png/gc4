@@ -31,6 +31,9 @@ setup(
             "tag_pose=cv.Apriltag_pose:main",
             "cam_pos=cv.cam_pos:main",
             "tag_image_pub=cv.Apriltag_image_pub:main",
+            "HECal=cv.HECal:main",
+            "circle=cv.circle:main",
+            "tag_image_pub=cv.Apriltag_image_pub:main",
         ],
     },
 )
