@@ -31,10 +31,8 @@ def generate_launch_description():
     # --- 新增：串口端口 ---
     port = LaunchConfiguration('port', default='/dev/ttyUSB0')
     
-    # IK 杆长参数 (单位 mm)
-    l1 = LaunchConfiguration('l1', default='50.0')
-    l2 = LaunchConfiguration('l2', default='300.0')
-    l3 = LaunchConfiguration('l3', default='300.0')
+    # 杆长不再从 launch 传：myik / myfk 节点里的默认值就是实测值，保持单一来源，
+    # 避免出现 launch 写 300/300、代码里是 205.23 这种两边对不上的情况。
 
     calib_file = os.path.join(
         get_package_share_directory('cv'), 'config', 'gc480p.json')
@@ -44,14 +42,6 @@ def generate_launch_description():
                                    description='true=合成tag图像(tag_image_pub), false=真摄像头(raw_image_pub)'),
           DeclareLaunchArgument('serial_sim', default_value='true',
                                    description='true=串口sim模式(无设备也能跑, 仅打印帧), false=真实串口'),
-          DeclareLaunchArgument('l1', default_value='0.0',
-                                   description='IK: 基座到肩部高度(mm)'),
-          DeclareLaunchArgument('l2', default_value='300.0',
-                                   description='IK: 大臂长度(mm)'),
-          DeclareLaunchArgument('l3', default_value='300.0',
-                                   description='IK: 前臂长度(mm)'),
-          
-          # ----- 新增的参数声明 -----
           DeclareLaunchArgument('camera_id', default_value='4',
                                    description='摄像头设备号（对应 /dev/video 后的数字）'),
           DeclareLaunchArgument('width', default_value='640',
@@ -88,7 +78,6 @@ def generate_launch_description():
 
           # ---- IK 逆解 -> 发布关节角 /joint_states ----
           Node(package='myik', executable='my_ik_node', name='my_ik_node',
-               parameters=[{'l1': l1, 'l2': l2, 'l3': l3}],
                output='screen'),
 
           # ---- 串口：driver 管字节，bridge 管协议 ----

@@ -1,0 +1,4 @@
+/home/gems/gc4/src/myik/src/my_ik_node.cpp: In member function ‘bool MyIKNode::solve(double, double, double, std::array<double, 4>&)’:
+/home/gems/gc4/src/myik/src/my_ik_node.cpp:171:10: warning: variable ‘clamped’ set but not used [-Wunused-but-set-variable]
+  171 |     bool clamped = false;
+      |          ^~~~~~~

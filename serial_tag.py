@@ -126,14 +126,14 @@ def main():
                     for _ in range(5):
                         send_to_serial(text, ser)
                         time.sleep(0.1)
-                cap.release()
-                cv2.destroyAllWindows()
-                return
+                # cap.release()
+                # cv2.destroyAllWindows()
+                # return
             except (ValueError, serial.SerialException) as e:
                 print(f"发送失败: {e}")
 
         # 显示实时画面（方便调试）
-        cv2.imshow("QR Scanner", frame)
+        #cv2.imshow("QR Scanner", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 

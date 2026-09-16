@@ -1,0 +1,29 @@
+[0.013s] Invoking command in '/home/gems/gc4/build/myfk': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --build /home/gems/gc4/build/myfk -- -j14 -l14
+[0.056s] [ 50%] Building CXX object CMakeFiles/myfk_node.dir/src/myfk_node.cpp.o
+[6.073s] [100%] Linking CXX executable myfk_node
+[6.166s] [100%] Built target myfk_node
+[6.176s] Invoked command in '/home/gems/gc4/build/myfk' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --build /home/gems/gc4/build/myfk -- -j14 -l14
+[6.176s] Invoking command in '/home/gems/gc4/build/myfk': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --install /home/gems/gc4/build/myfk
+[6.180s] -- Install configuration: "Release"
+[6.180s] -- Installing: /home/gems/gc4/install/myfk/lib/myfk/myfk_node
+[6.181s] -- Set runtime path of "/home/gems/gc4/install/myfk/lib/myfk/myfk_node" to ""
+[6.181s] -- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/launch
+[6.181s] -- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/launch/arm_kinematics.launch.py
+[6.181s] -- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/rviz
+[6.181s] -- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/rviz/arm_kinematics.rviz
+[6.181s] -- Up-to-date: /home/gems/gc4/install/myfk/share/ament_index/resource_index/package_run_dependencies/myfk
+[6.181s] -- Up-to-date: /home/gems/gc4/install/myfk/share/ament_index/resource_index/parent_prefix_path/myfk
+[6.181s] -- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/environment/ament_prefix_path.sh
+[6.181s] -- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/environment/ament_prefix_path.dsv
+[6.181s] -- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/environment/path.sh
+[6.181s] -- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/environment/path.dsv
+[6.181s] -- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/local_setup.bash
+[6.181s] -- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/local_setup.sh
+[6.181s] -- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/local_setup.zsh
+[6.181s] -- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/local_setup.dsv
+[6.181s] -- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/package.dsv
+[6.181s] -- Up-to-date: /home/gems/gc4/install/myfk/share/ament_index/resource_index/packages/myfk
+[6.185s] -- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/cmake/myfkConfig.cmake
+[6.185s] -- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/cmake/myfkConfig-version.cmake
+[6.185s] -- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/package.xml
+[6.185s] Invoked command in '/home/gems/gc4/build/myfk' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --install /home/gems/gc4/build/myfk

@@ -1,0 +1,8 @@
+/home/gems/gc4/src/myfk/src/myfk_node.cpp: In member function ‘void MyFkNode::jointCallback(sensor_msgs::msg::JointState_<std::allocator<void> >::SharedPtr)’:
+/home/gems/gc4/src/myfk/src/myfk_node.cpp:138:50: error: operands to ‘?:’ have different types ‘rclcpp::Time’ and ‘std_msgs::msg::Header_<std::allocator<void> >::_stamp_type’ {aka ‘builtin_interfaces::msg::Time_<std::allocator<void> >’}
+  138 |     ps.header.stamp = msg->header.stamp.sec == 0 ? this->now() : msg->header.stamp;
+      |                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/gems/gc4/src/myfk/src/myfk_node.cpp:138:50: note:   and each type can be converted to the other
+gmake[2]: *** [CMakeFiles/myfk_node.dir/build.make:76：CMakeFiles/myfk_node.dir/src/myfk_node.cpp.o] 错误 1
+gmake[1]: *** [CMakeFiles/Makefile2:137：CMakeFiles/myfk_node.dir/all] 错误 2
+gmake: *** [Makefile:146：all] 错误 2

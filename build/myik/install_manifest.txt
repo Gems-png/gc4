@@ -1,0 +1,16 @@
+/home/gems/gc4/install/myik/lib/myik/my_ik_node
+/home/gems/gc4/install/myik/share/ament_index/resource_index/package_run_dependencies/myik
+/home/gems/gc4/install/myik/share/ament_index/resource_index/parent_prefix_path/myik
+/home/gems/gc4/install/myik/share/myik/environment/ament_prefix_path.sh
+/home/gems/gc4/install/myik/share/myik/environment/ament_prefix_path.dsv
+/home/gems/gc4/install/myik/share/myik/environment/path.sh
+/home/gems/gc4/install/myik/share/myik/environment/path.dsv
+/home/gems/gc4/install/myik/share/myik/local_setup.bash
+/home/gems/gc4/install/myik/share/myik/local_setup.sh
+/home/gems/gc4/install/myik/share/myik/local_setup.zsh
+/home/gems/gc4/install/myik/share/myik/local_setup.dsv
+/home/gems/gc4/install/myik/share/myik/package.dsv
+/home/gems/gc4/install/myik/share/ament_index/resource_index/packages/myik
+/home/gems/gc4/install/myik/share/myik/cmake/myikConfig.cmake
+/home/gems/gc4/install/myik/share/myik/cmake/myikConfig-version.cmake
+/home/gems/gc4/install/myik/share/myik/package.xml

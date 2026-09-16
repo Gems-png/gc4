@@ -1,0 +1,22 @@
+[0.011s] Invoking command in '/home/gems/gc4/build/myik': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --build /home/gems/gc4/build/myik -- -j14 -l14
+[0.057s] [100%] Built target my_ik_node
+[0.067s] Invoked command in '/home/gems/gc4/build/myik' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --build /home/gems/gc4/build/myik -- -j14 -l14
+[0.073s] Invoking command in '/home/gems/gc4/build/myik': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --install /home/gems/gc4/build/myik
+[0.077s] -- Install configuration: "Release"
+[0.078s] -- Up-to-date: /home/gems/gc4/install/myik/lib/myik/my_ik_node
+[0.078s] -- Up-to-date: /home/gems/gc4/install/myik/share/ament_index/resource_index/package_run_dependencies/myik
+[0.078s] -- Up-to-date: /home/gems/gc4/install/myik/share/ament_index/resource_index/parent_prefix_path/myik
+[0.078s] -- Up-to-date: /home/gems/gc4/install/myik/share/myik/environment/ament_prefix_path.sh
+[0.078s] -- Up-to-date: /home/gems/gc4/install/myik/share/myik/environment/ament_prefix_path.dsv
+[0.078s] -- Up-to-date: /home/gems/gc4/install/myik/share/myik/environment/path.sh
+[0.079s] -- Up-to-date: /home/gems/gc4/install/myik/share/myik/environment/path.dsv
+[0.079s] -- Up-to-date: /home/gems/gc4/install/myik/share/myik/local_setup.bash
+[0.079s] -- Up-to-date: /home/gems/gc4/install/myik/share/myik/local_setup.sh
+[0.079s] -- Up-to-date: /home/gems/gc4/install/myik/share/myik/local_setup.zsh
+[0.079s] -- Up-to-date: /home/gems/gc4/install/myik/share/myik/local_setup.dsv
+[0.079s] -- Up-to-date: /home/gems/gc4/install/myik/share/myik/package.dsv
+[0.079s] -- Up-to-date: /home/gems/gc4/install/myik/share/ament_index/resource_index/packages/myik
+[0.079s] -- Up-to-date: /home/gems/gc4/install/myik/share/myik/cmake/myikConfig.cmake
+[0.079s] -- Up-to-date: /home/gems/gc4/install/myik/share/myik/cmake/myikConfig-version.cmake
+[0.079s] -- Up-to-date: /home/gems/gc4/install/myik/share/myik/package.xml
+[0.079s] Invoked command in '/home/gems/gc4/build/myik' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --install /home/gems/gc4/build/myik

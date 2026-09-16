@@ -8,6 +8,10 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 
 add_executable(myfk_node src/myfk_node.cpp)
 target_include_directories(myfk_node PUBLIC
@@ -17,10 +21,18 @@ target_compile_features(myfk_node PUBLIC c_std_99 cxx_std_17)  # Require C99 and
 ament_target_dependencies(
   myfk_node
   "rclcpp"
+  "geometry_msgs"
+  "sensor_msgs"
+  "std_msgs"
+  "visualization_msgs"
 )
 
 install(TARGETS myfk_node
   DESTINATION lib/${PROJECT_NAME})
+
+# RViz 配置和 launch 文件
+install(DIRECTORY launch rviz
+  DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

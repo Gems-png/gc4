@@ -1,0 +1,25 @@
+[ 50%] Building CXX object CMakeFiles/myfk_node.dir/src/myfk_node.cpp.o
+[100%] Linking CXX executable myfk_node
+[100%] Built target myfk_node
+-- Install configuration: "Release"
+-- Installing: /home/gems/gc4/install/myfk/lib/myfk/myfk_node
+-- Set runtime path of "/home/gems/gc4/install/myfk/lib/myfk/myfk_node" to ""
+-- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/launch
+-- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/launch/arm_kinematics.launch.py
+-- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/rviz
+-- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/rviz/arm_kinematics.rviz
+-- Up-to-date: /home/gems/gc4/install/myfk/share/ament_index/resource_index/package_run_dependencies/myfk
+-- Up-to-date: /home/gems/gc4/install/myfk/share/ament_index/resource_index/parent_prefix_path/myfk
+-- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/environment/ament_prefix_path.sh
+-- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/environment/ament_prefix_path.dsv
+-- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/environment/path.sh
+-- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/environment/path.dsv
+-- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/local_setup.bash
+-- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/local_setup.sh
+-- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/local_setup.zsh
+-- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/local_setup.dsv
+-- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/package.dsv
+-- Up-to-date: /home/gems/gc4/install/myfk/share/ament_index/resource_index/packages/myfk
+-- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/cmake/myfkConfig.cmake
+-- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/cmake/myfkConfig-version.cmake
+-- Up-to-date: /home/gems/gc4/install/myfk/share/myfk/package.xml

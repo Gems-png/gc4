@@ -1,0 +1,4 @@
+Invoking command in '/home/gems/gc4/build/myfk': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --build /home/gems/gc4/build/myfk -- -j14 -l14
+Invoked command in '/home/gems/gc4/build/myfk' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --build /home/gems/gc4/build/myfk -- -j14 -l14
+Invoking command in '/home/gems/gc4/build/myfk': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --install /home/gems/gc4/build/myfk
+Invoked command in '/home/gems/gc4/build/myfk' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --install /home/gems/gc4/build/myfk

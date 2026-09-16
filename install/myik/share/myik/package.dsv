@@ -1,0 +1,8 @@
+source;share/myik/hook/cmake_prefix_path.ps1
+source;share/myik/hook/cmake_prefix_path.dsv
+source;share/myik/hook/cmake_prefix_path.sh
+source;share/myik/local_setup.bash
+source;share/myik/local_setup.dsv
+source;share/myik/local_setup.ps1
+source;share/myik/local_setup.sh
+source;share/myik/local_setup.zsh

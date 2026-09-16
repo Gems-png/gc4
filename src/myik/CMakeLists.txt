@@ -9,24 +9,16 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
-find_package(Qt5 REQUIRED COMPONENTS Widgets Core)
+find_package(visualization_msgs REQUIRED)
 
-set(CMAKE_AUTOMOC ON)
-set(CMAKE_INCLUDE_CURRENT_DIR ON)
-
+# 可视化搬到 RViz，不再依赖 Qt（车上跑也不用装 Qt 了）
 add_executable(my_ik_node src/my_ik_node.cpp)
 
-# 使用 ament_target_dependencies 添加 ROS 依赖（包含路径、库等）
 ament_target_dependencies(my_ik_node
   rclcpp
   geometry_msgs
   sensor_msgs
-)
-
-# 单独链接 Qt 库
-target_link_libraries(my_ik_node
-  Qt5::Widgets
-  Qt5::Core
+  visualization_msgs
 )
 
 target_compile_features(my_ik_node PUBLIC c_std_99 cxx_std_17)

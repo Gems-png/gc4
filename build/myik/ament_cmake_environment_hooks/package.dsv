@@ -1,0 +1,4 @@
+source;share/myik/local_setup.bash
+source;share/myik/local_setup.dsv
+source;share/myik/local_setup.sh
+source;share/myik/local_setup.zsh

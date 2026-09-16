@@ -1,0 +1,43 @@
+-- Found ament_cmake: 1.3.14 (/opt/ros/humble/share/ament_cmake/cmake)
+-- Found rclcpp: 16.0.19 (/opt/ros/humble/share/rclcpp/cmake)
+-- Found rosidl_generator_c: 3.1.9 (/opt/ros/humble/share/rosidl_generator_c/cmake)
+-- Found rosidl_adapter: 3.1.9 (/opt/ros/humble/share/rosidl_adapter/cmake)
+-- Found rosidl_generator_cpp: 3.1.9 (/opt/ros/humble/share/rosidl_generator_cpp/cmake)
+-- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+-- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+-- Found rmw_implementation_cmake: 6.1.3 (/opt/ros/humble/share/rmw_implementation_cmake/cmake)
+-- Found rmw_fastrtps_cpp: 6.2.10 (/opt/ros/humble/share/rmw_fastrtps_cpp/cmake)
+-- Using RMW implementation 'rmw_fastrtps_cpp' as default
+-- Found geometry_msgs: 4.9.2 (/opt/ros/humble/share/geometry_msgs/cmake)
+-- Found sensor_msgs: 4.9.2 (/opt/ros/humble/share/sensor_msgs/cmake)
+-- Found visualization_msgs: 4.9.2 (/opt/ros/humble/share/visualization_msgs/cmake)
+-- Found ament_lint_auto: 0.12.15 (/opt/ros/humble/share/ament_lint_auto/cmake)
+-- Added test 'cppcheck' to perform static code analysis on C / C++ code
+-- Configured cppcheck include dirs: 
+-- Configured cppcheck exclude dirs and/or files: 
+-- Added test 'lint_cmake' to check CMake code style
+-- Added test 'uncrustify' to check C / C++ code style
+-- Configured uncrustify additional arguments: 
+-- Added test 'xmllint' to check XML markup files
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /home/gems/gc4/build/myik
+Consolidate compiler generated dependencies of target my_ik_node
+[100%] Built target my_ik_node
+-- Install configuration: "Release"
+-- Up-to-date: /home/gems/gc4/install/myik/lib/myik/my_ik_node
+-- Up-to-date: /home/gems/gc4/install/myik/share/ament_index/resource_index/package_run_dependencies/myik
+-- Up-to-date: /home/gems/gc4/install/myik/share/ament_index/resource_index/parent_prefix_path/myik
+-- Up-to-date: /home/gems/gc4/install/myik/share/myik/environment/ament_prefix_path.sh
+-- Installing: /home/gems/gc4/install/myik/share/myik/environment/ament_prefix_path.dsv
+-- Up-to-date: /home/gems/gc4/install/myik/share/myik/environment/path.sh
+-- Installing: /home/gems/gc4/install/myik/share/myik/environment/path.dsv
+-- Up-to-date: /home/gems/gc4/install/myik/share/myik/local_setup.bash
+-- Up-to-date: /home/gems/gc4/install/myik/share/myik/local_setup.sh
+-- Up-to-date: /home/gems/gc4/install/myik/share/myik/local_setup.zsh
+-- Installing: /home/gems/gc4/install/myik/share/myik/local_setup.dsv
+-- Installing: /home/gems/gc4/install/myik/share/myik/package.dsv
+-- Up-to-date: /home/gems/gc4/install/myik/share/ament_index/resource_index/packages/myik
+-- Up-to-date: /home/gems/gc4/install/myik/share/myik/cmake/myikConfig.cmake
+-- Up-to-date: /home/gems/gc4/install/myik/share/myik/cmake/myikConfig-version.cmake
+-- Up-to-date: /home/gems/gc4/install/myik/share/myik/package.xml

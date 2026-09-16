@@ -1,0 +1,6 @@
+Invoking command in '/home/gems/gc4/build/myik': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake /home/gems/gc4/src/myik -DCMAKE_INSTALL_PREFIX=/home/gems/gc4/install/myik
+Invoked command in '/home/gems/gc4/build/myik' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake /home/gems/gc4/src/myik -DCMAKE_INSTALL_PREFIX=/home/gems/gc4/install/myik
+Invoking command in '/home/gems/gc4/build/myik': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --build /home/gems/gc4/build/myik -- -j14 -l14
+Invoked command in '/home/gems/gc4/build/myik' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --build /home/gems/gc4/build/myik -- -j14 -l14
+Invoking command in '/home/gems/gc4/build/myik': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --install /home/gems/gc4/build/myik
+Invoked command in '/home/gems/gc4/build/myik' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --install /home/gems/gc4/build/myik

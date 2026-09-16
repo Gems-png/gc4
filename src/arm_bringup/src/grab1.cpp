@@ -1,4 +1,4 @@
-// grab1 用于从转盘上抓取物体
+// grab1 用于从转盘上抓取物体，需实时跟踪
 
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
