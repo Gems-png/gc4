@@ -95,6 +95,25 @@
    **repeat** = 同色的圆照抓（老行为）：同一站又来了一个同色物料时用得上，
    代价是底下那个同色定位圆也可能被当成物料再抓一次。
 
+8. **按 tag 前三位数字的顺序抓**（--tag-order，默认开）：规则里二维码是 4 组三位数、
+   用 + 连接，第 1 组就是第一批物料的**搬运颜色和顺序**（颜色编号 红1 黄2 蓝3 绿4 黑5
+   浅蓝6）。例：452+321+254+312 的前三位 = 4、5、2 → 先抓绿、再抓黑、最后抓黄。
+   认到 tag 就把顺序排出来，之后每一帧挑**队首那个颜色**的圆：同色有好几个就抓最大的
+   那个（跟"谁大抓谁"一个口径）；**真发了 0x02 才**往前挪一位（干跑也一样，状态机
+   走的路要和线上一样）。三个都抓完 = 这一批完了，画面里剩下的**不再抓**（多半是定位圆
+   或者下一批），等车跑到新的一站或者重新认到 tag 才从头来。
+   认不到 tag / --no-tag-order 就退回老的"谁大抓谁"。
+   该抓的颜色**画面里没有**（认不出颜色、被挡住、转盘没转到位）时看 --order-miss-policy：
+   **biggest**（默认）先等 --order-miss-wait 秒（默认 1.5s），还没有就抓画面里最大的那个
+   没抓过的 —— 跟"微调发满就照抓"一个口径，宁可抓偏也不整轮卡死不抓，原因会打在终端上；
+   **wait** 就一直压着等（严格按顺序，代价是颜色认不出来就整轮卡住）。
+   压住不发 0x02 的时候停稳/对准**照走**，所以那不算"没看到圆"，不会去触发第 6 条的往前找。
+   跟第 7 条一起用时以顺序为准：顺序要的颜色永远是首选，抓过的颜色只在"顺序里没有它"
+   的时候才被滤掉（tag 里同一个颜色出现两次会打警告 —— 同一批两个同色物料分不出来，
+   第二个会被压住不抓）。
+   "车跑到新的一站"由 --align-new-stop-gap 判定，微调次数、抓过的颜色、tag 顺序
+   都在这一个事件上重置 —— 那个间隔要卡在"抓取动作报的 0x10"和"真开走一段路"之间。
+
 用法：
     python3 schooltest2.py --list                  # 看这台机器上有哪些摄像头
     python3 schooltest2.py                         # 默认两路都开，真发给下位机
@@ -321,6 +340,31 @@ COLOR_POLICY = 'once'      # （--color-policy once / repeat）
                            # once   = 抓过的颜色不再抓（默认，防空抓）
                            # repeat = 同色的圆照抓（老的"谁大抓谁"）
 
+# 「按 tag 前三位数字的顺序抓」—— 规则：二维码是 4 组三位数、用 + 连接，
+# 第 1 组 = 第一批物料的**搬运颜色和顺序**，第 2 组是第一批的放置位置，
+# 第 3、4 组是第二批的（颜色编号：红1 黄2 蓝3 绿4 黑5 浅蓝6，见 COLOR_CODE）。
+#   例：452+321+254+312 的前三位 = 4、5、2 → 先抓绿(4)、再抓黑(5)、最后抓黄(2)。
+# 怎么用的：每一帧挑"顺序里排头那个颜色"的圆 —— 同一个颜色在画面里有好几个就抓
+# 最大的那个（跟原来"谁大抓谁"一个口径）；**真发了 0x02 才**把顺序往前挪一位。
+# 三个都抓完 = 这一批完了，**不再抓**（画面上剩下的多半是定位圆/别的批次的），
+# 等车跑到新的一站或者重新认到 tag 才从头来。
+# 和 --color-policy 是两件事：那个管"同一个颜色能不能抓第二次"（防底下那个同色
+# 定位圆的空抓），这个管"该抓哪个颜色"。两个都开着时以顺序为准。
+TAG_ORDER_ENABLE = True     # （--tag-order / --no-tag-order）关掉 = 老的"谁大抓谁"
+TAG_ORDER_GROUP = 1         # 用第几组三位数当抓取顺序（--order-group）：
+                            # 规则里 1 = 第一批、3 = 第二批。**第二批要按第 3 组抓的话
+                            # 得连批次一起管**（现在两批都会用这一组），说一声再加
+TAG_ORDER_MISS_POLICY = 'biggest'
+                            # 该抓的颜色**没出现在画面里**时怎么办（--order-miss-policy）。
+                            # 认不出颜色（光照偏、黑物料）、被机械臂挡住、转盘还没转到位
+                            # 都会这样：
+                            #   'biggest' 先等 TAG_ORDER_MISS_WAIT 秒，还没有就抓画面里
+                            #             最大的那个没抓过的（默认）—— 跟"微调发满就照抓"
+                            #             一个口径：宁可抓偏也不整轮卡着不抓。原因会打出来
+                            #   'wait'    一直压着不抓、等它出现（严格按顺序；
+                            #             代价：颜色认不出来就整轮卡住）
+TAG_ORDER_MISS_WAIT = 1.5   # 'biggest' 时等满几秒就放弃（--order-miss-wait）
+
 
 # 类型 -> 数据段长度的白名单。协议里没有 CRC 也没有帧尾，
 # 帧边界只能靠这张表认，所以新类型必须在这里登记，否则会被当成噪声跳过。
@@ -349,6 +393,8 @@ COLOR_CN = {"red": "红", "yellow": "黄", "green": "绿",
             "blue": "蓝", "light_blue": "浅蓝", "black": "黑"}
 COLOR_CODE = {"red": "1", "yellow": "2", "blue": "3",
               "green": "4", "black": "5", "light_blue": "6"}   # 规则里的颜色编号
+CODE_COLOR = {code: name for name, code in COLOR_CODE.items()}  # 反过来：'1' -> 'red'
+                                                                # （tag 里那三位数字用）
 # 画框用的 BGR（cv2.putText 画不了中文，框边上的字用英文）
 COLOR_BGR = {"red": (0, 0, 255), "yellow": (0, 255, 255), "green": (0, 255, 0),
              "blue": (255, 0, 0), "light_blue": (255, 180, 0), "black": (90, 90, 90)}
@@ -862,6 +908,47 @@ def build_tag_frame(data):
     if (not data.isdigit()) or len(data) != TAG_DATA_LEN:
         raise ValueError(f'二维码内容必须是 {TAG_DATA_LEN} 位数字，实际: {data!r}')
     return FRAME_HEADER + bytes([TYPE_TAG, TAG_DATA_LEN]) + data.encode('ascii')
+
+
+def parse_tag_order(text, group=TAG_ORDER_GROUP):
+    """tag 内容 -> 这一批要抓的颜色顺序（list），认不出来返回 None。
+
+    规则：二维码是 4 组三位数、用 + 连接，第 1 组就是第一批物料的搬运颜色**和顺序**。
+    所以 452+321+254+312（或者去掉 + 的 452321254312）第 1 组取出来是 '452'
+    → ['green', 'black', 'yellow']（颜色编号见 COLOR_CODE）。
+
+    组里认不出的数字（0/7/8/9）会跳过并说一声：跳一个还剩两个，照样按顺序抓，
+    总比整组不认、退回去"谁大抓谁"要好。整组一个都认不出才返回 None。
+    """
+    digits = ''.join(ch for ch in text if ch.isdigit())
+    end = group * 3
+    if group < 1 or len(digits) < end:
+        print(f'[顺序] tag 是 {text!r}，凑不出第 {group} 组三位数'
+              f'（一共才 {len(digits)} 位数字），这一轮不按顺序抓')
+        return None
+    chunk = digits[end - 3:end]
+    order, bad = [], []
+    for ch in chunk:
+        name = CODE_COLOR.get(ch)
+        if name is None:
+            bad.append(ch)
+        else:
+            order.append(name)
+    if bad:
+        print(f'[顺序] 第 {group} 组「{chunk}」里的 {"、".join(bad)} 不是颜色编号'
+              f'（红1 黄2 蓝3 绿4 黑5 浅蓝6），这几位跳过')
+    if not order:
+        print(f'[顺序] 第 {group} 组「{chunk}」一个颜色编号都对不上，这一轮不按顺序抓')
+        return None
+    if len(set(order)) != len(order):
+        # 同一批里两个同色物料：抓走第一个之后，它底下压着的同色定位圆还在原处，
+        # 第二个就分不出来了（--color-policy once 会把它压住不抓，不会空抓，
+        # 但那一批也就少抓一个）。先把话说明白，真遇上了再想办法
+        print(f'[顺序] ⚠ 第 {group} 组「{chunk}」里有重复的颜色，同一批两个同色物料'
+              f'没法区分（底下压着的定位圆也是这个颜色），第二个会被压住不抓')
+    print(f'[顺序] tag 第 {group} 组「{chunk}」= 按这个顺序抓：'
+          + ' → '.join(f'{COLOR_CN[c]}({COLOR_CODE[c]})' for c in order))
+    return order
 
 
 def build_cmd_frame(cmd):
@@ -1423,6 +1510,13 @@ def main():
                     help='发完一发微调后最多等几秒让它回到 0x01（默认 3.0）。'
                          '协议里一发往返 0.4~0.5s；超时 = 这发没生效，'
                          '这一站就不再挪车（不然会一直空等）')
+    ap.add_argument('--align-new-stop-gap', type=float, default=ALIGN_NEW_STOP_GAP,
+                    help=f'"车自己跑到新的一站"的判据：离开 0x01 超过这么久才回来'
+                         f'（默认 {ALIGN_NEW_STOP_GAP:.0f}s）。微调次数、抓过的颜色、'
+                         f'tag 顺序都在这儿重置。**要卡在"抓取动作报的 0x10"和"真开走'
+                         f'一段路"之间**：太短，抓完回到 0x01 那下就被当成新的一站'
+                         f'（黑名单白清，2026-09-18 踩过）；太长，车开到下一个抓取点'
+                         f'也不重置（同一批的颜色会一直压着不抓）')
     ap.add_argument('--align-max', type=int, default=ALIGN_MAX,
                     help=f'一次停稳里最多发几条微调（默认 {ALIGN_MAX}）。用满了就**不再挪车、'
                          f'照抓**（抓偏一点也比整轮卡着不抓好），原因会打出来；'
@@ -1447,6 +1541,24 @@ def main():
     ap.add_argument('--no-color-blacklist', dest='color_policy', action='store_const',
                     const='repeat', default=COLOR_POLICY,
                     help='老写法，等于 --color-policy repeat')
+    ap.add_argument('--tag-order', action=argparse.BooleanOptionalAction,
+                    default=TAG_ORDER_ENABLE,
+                    help=f'按 tag 前三位数字的顺序抓（默认 {"开" if TAG_ORDER_ENABLE else "关"}）。'
+                         f'规则：二维码 4 组三位数、+ 连接，第 1 组 = 第一批物料的颜色和顺序'
+                         f'（452 = 先绿再黑后黄）。关掉 = 谁大抓谁（老行为）')
+    ap.add_argument('--order-group', type=int, default=TAG_ORDER_GROUP,
+                    help=f'用 tag 里第几组三位数当抓取顺序（默认 {TAG_ORDER_GROUP}）：'
+                         f'第 1 组 = 第一批物料，第 3 组 = 第二批（第 2/4 组是放置位置，'
+                         f'不是颜色）。现在两批都用这一组，要一批一组说一声')
+    ap.add_argument('--order-miss-policy', choices=('biggest', 'wait'),
+                    default=TAG_ORDER_MISS_POLICY,
+                    help=f'按顺序该抓的颜色**画面里没有**时怎么办（默认 '
+                         f'{TAG_ORDER_MISS_POLICY}）。biggest = 等 --order-miss-wait 秒'
+                         f'还没有就抓画面里最大的那个没抓过的（跟"微调发满就照抓"一个口径）；'
+                         f'wait = 一直等它出现（严格按顺序，颜色认不出来就整轮卡住）')
+    ap.add_argument('--order-miss-wait', type=float, default=TAG_ORDER_MISS_WAIT,
+                    help=f'--order-miss-policy biggest 时等几秒才放弃（默认 '
+                         f'{TAG_ORDER_MISS_WAIT}）')
     ap.add_argument('--still-time', type=float, default=STILL_TIME,
                     help='"等待抓取指令"时，圆要连续静止这么多秒才准动（默认 0.5）；'
                          '0=一看到圆就动（微调和对准都跟着这个门槛走）')
@@ -1549,7 +1661,9 @@ def main():
           f'一次停稳最多挪 {args.align_max if args.align_max > 0 else "无限"} 步')
     print(f'[对准] 微调节拍跟着下位机走：一发一发来，等它报回 0x01 才发下一发'
           f'（等不到就 {args.align_return_timeout:.0f}s 超时停手）；'
-          f'另有 {args.align_interval:.1f}s 的最小间隔兜底')
+          f'另有 {args.align_interval:.1f}s 的最小间隔兜底；'
+          f'离开 0x01 超过 {args.align_new_stop_gap:.0f}s 才回来 = 车跑到新的一站'
+          f'（微调次数/抓过的颜色/tag 顺序都在这儿重置）')
     print(f'[朝向] 物料相机 {CAM_ROT_CN[args.cam_rot % 4]}，'
           f'tag 相机 {CAM_ROT_CN[args.tag_cam_rot % 4]}')
     print(f'[发送] {"只打印（--dry-run）" if args.dry_run else "真发"}')
@@ -1558,6 +1672,17 @@ def main():
                                    '车跑到新的一站清空'
                                    if skip_grabbed else
                                    '允许 —— 同色的圆照抓（--color-policy repeat）'))
+    # 这一轮"抓哪一个"的总口径：按 tag 顺序还是谁大抓谁
+    if args.tag_order:
+        print(f'[顺序] 按 tag 第 {args.order_group} 组三位数字的顺序抓：认到 tag 就把顺序'
+              f'排出来，每抓走一个往前挪一位，三个抓完就不再抓（等新的一站/新 tag）。'
+              f'该抓的颜色画面里没有时 '
+              + ('一直等着不抓（--order-miss-policy wait）'
+                 if args.order_miss_policy == 'wait' else
+                 f'先等 {args.order_miss_wait:.1f}s，还没有就抓最大的那个没抓过的'
+                 f'（--order-miss-policy biggest）'))
+    else:
+        print('[顺序] 不按 tag 顺序抓（--no-tag-order）：谁大抓谁')
 
     link = McuLink(args.port, BAUDRATE, verbose=args.rx_log)
     link.start()
@@ -1571,6 +1696,11 @@ def main():
     last_colors = None       # 上一次的圆（数量/位置/颜色），变了才打印
     last_state = None        # 上一次收到的 0x20 状态
     last_skip = None         # 上一次"想发但被状态挡住"的原因，变了才打印
+    order_queue = None       # tag 前三位数字给的抓取顺序（list）。None = 没按顺序抓
+                             # （没认到 tag / --no-tag-order）；非空 = 队首那个颜色先抓；
+                             # 空 list = 这一批三个都抓完了，画面里剩下的不再抓
+    order_miss_since = None  # 队首那个颜色"画面里没有"是从什么时候开始的；看到就清
+    order_miss_reason = ''   # 为什么算没有（压根没这个颜色 / 这个颜色这一站抓过了）
     qr_text = None           # 认到的二维码（留着，等到 0x20 说等待二维码时发指令）
     qr_done_episode = None   # 本轮"等待二维码"里已经发过 01 了
     last_grab = 0.0          # 上次发"抓取一次"的时刻
@@ -1586,7 +1716,8 @@ def main():
     aim = None               # 对准点 (x, y)，按这一帧的实际尺寸算；None = 还没出帧
     aim_err = None           # 大圆圆心 - 对准点 = (ex, ey)；None = 没有圆
     # 微调节拍器：发完一发要等它回到 0x01 才准发下一发（USART1_Nudge_Protocol.md §四）
-    pacer = NudgePacer(args.align_interval, args.align_return_timeout)
+    pacer = NudgePacer(args.align_interval, args.align_return_timeout,
+                       args.align_new_stop_gap)
     offline_align_warned = False   # "帧没真发出去、退回定时节拍"这句只提醒一次
     align_sent_err = None    # 发那条微调时的误差 (ex, ey)，等它走完拿来回量"一步多少像素"
     align_sent_cmd = None    # 那条微调的方向（0x30~0x33），用来定量的是哪个轴
@@ -1632,11 +1763,35 @@ def main():
                 return None, None            # 还没出帧，对准点算不出来
 
             def want_grab(reason):
-                """该发抓取了 —— 但这个颜色抓过就压住不发（--color-policy once）。
+                """该发抓取了 —— 但下面三种情况先压住不发。
 
                 压住只是不发 0x02：上面的停稳、对准那几关**照走**（车还是会对准它），
-                所以拿到的不是"没物料"，不会去触发往前找。底下那个同色的圆就让它那么放着。
+                所以拿到的不是"没物料"，不会去触发往前找。那些圆就让它那么放着。
                 """
+                # (1) tag 顺序里的三个都抓完了：这一批完了。画面里剩下的不是这一批的
+                # 物料（多半是定位圆或者下一批），再抓就是多抓
+                if order_queue is not None and not order_queue:
+                    return None, ('tag 顺序里的物料都抓完了（这一批完了），画面里剩下的'
+                                  '不再抓；车跑到新的一站或者重新认到 tag 才从头来')
+                # (2) 按顺序该抓的颜色还没出现（--order-miss-policy biggest 等满
+                # --order-miss-wait 秒就放行，下面照抓画面里最大的那个；wait 就一直等）
+                if order_miss_since is not None:
+                    waited = now - order_miss_since
+                    if args.order_miss_policy == 'wait' or waited < args.order_miss_wait:
+                        return None, (f'{order_miss_reason}；tag 顺序是 '
+                                      + ' → '.join(COLOR_CN.get(c, c) for c in order_queue)
+                                      + f'，该抓{COLOR_CN.get(order_color, order_color)}色，'
+                                      f'先压住不发 0x02'
+                                      f'（--order-miss-policy {args.order_miss_policy}'
+                                      + (f'，等满 {args.order_miss_wait:.1f}s 还没有就抓'
+                                         f'画面里最大的那个没抓过的'
+                                         if args.order_miss_policy == 'biggest' else '') + '）')
+                    reason = ((reason + '；') if reason else '') + (
+                        f'{order_miss_reason}，等满 {args.order_miss_wait:.1f}s 了，'
+                        f'照抓画面里最大的那个没抓过的'
+                        f'（--order-miss-policy biggest；顺序要的是'
+                        f'{COLOR_CN.get(order_color, order_color)}色）')
+                # (3) 这个颜色这一站抓过（--color-policy once）
                 if skip_grabbed and target_color in grabbed_colors:
                     return None, (f'{COLOR_CN.get(target_color, target_color)}色已经抓过一次了，'
                                   f'画面里这个同色的圆是它底下压着的那个，不抓'
@@ -1688,7 +1843,15 @@ def main():
         if tag_wk:
             _f, tag_text, _m = tag_wk.snapshot()
         if tag_text:
-            print(f'[Tag] 识别到: {tag_text}')
+            if tag_text != last_tag:
+                # 同一个 tag 停在画面里会**连续认到好几十帧**，所以"认到新的 tag"只能看
+                # 内容变没变 —— 每帧都重置顺序的话，指针永远停在第一位走不动
+                print(f'[Tag] 识别到: {tag_text}')
+                if args.tag_order:
+                    order_queue = parse_tag_order(tag_text, args.order_group)
+                    order_miss_since = None
+                else:
+                    order_queue = None
             qr_text = tag_text
             qr_done_episode = None           # 内容变了，允许再通知一次
         
@@ -1742,8 +1905,28 @@ def main():
         # 它就是要抓的那块物料。still_since = 最后一次"看到它在动"的时刻；
         # 它离现在够久 = 停稳了。微调挪一步车之后画面会动一下 → 这里自动重新计时，
         # 所以两条微调之间天然隔开一段（想挪快点就调小 --still-time）。
+        order_color, order_ok, order_miss_reason = None, False, ''
         if materials:
-            big = pick_target(materials, grabbed_colors if skip_grabbed else ())
+            # 这一帧该抓哪一块：有 tag 顺序就按顺序挑（顺序里那个颜色在画面里有好几个
+            # 就抓最大的那个），没有顺序（没认到 tag / --no-tag-order）才是老的"谁大抓谁"。
+            if order_queue:
+                order_color = order_queue[0]
+                cands = [c for c in materials if c.color == order_color]
+                if skip_grabbed:
+                    # 这一站已经抓过这个颜色了（tag 里同一个颜色出现了两次）：
+                    # 画面里还剩的同色圆是物料底下压着的定位圆，不算数
+                    cands = [c for c in cands if c.color not in grabbed_colors]
+                hit = pick_target(cands, ())       # 空表 -> None
+                if hit is not None:
+                    big, order_ok = hit, True
+                else:
+                    order_miss_reason = (
+                        f'{COLOR_CN.get(order_color, order_color)}色这一站已经抓过一次了'
+                        f'（tag 里同一个颜色出现了两次？）'
+                        if any(c.color == order_color for c in materials) else
+                        f'画面里没有{COLOR_CN.get(order_color, order_color)}色的圆')
+            if not order_ok:
+                big = pick_target(materials, grabbed_colors if skip_grabbed else ())
             target_color = big.color
             if still_ref is None:
                 still_since = now                      # 第一次看到，从现在开始计时
@@ -1757,10 +1940,19 @@ def main():
             aim_err = ((big.center[0] - aim[0], big.center[1] - aim[1])
                        if aim is not None else None)
             no_circle_since = None                     # 看到圆了，"多久没圆"从零数
+            # 顺序里该抓的那个颜色没看到：从第一次没看到那一刻开始等
+            # （order-miss-policy biggest 等满几秒就抓大的那个；wait 就一直等）。
+            # 看到了就清零 —— 等一下再挪车的时候画面会动，别把它当成"又开始等了"
+            if order_color is not None and not order_ok:
+                if order_miss_since is None:
+                    order_miss_since = now
+            else:
+                order_miss_since = None
         else:
             still_ref, still_since = None, None        # 没圆就当没停稳，从零开始算
             aim_err = None
             target_color = None
+            order_miss_since = None                    # 一个圆都没有，不是"缺某个颜色"
             if no_circle_since is None:
                 no_circle_since = now                  # 从"一个圆都没看到"开始计时
 
@@ -1792,6 +1984,13 @@ def main():
                         print(f'[物料] 车跑到新的一站，颜色过滤清空（本来不抓：'
                             f'{"、".join(COLOR_CN.get(c, str(c)) for c in sorted(grabbed_colors, key=str))}）')
                     grabbed_colors.clear()
+                # tag 顺序也从头来：新的一站是新的物料，还要按同一个顺序抓三个
+                # （第二批要按第 3 组抓的话，见 TAG_ORDER_GROUP）
+                if args.tag_order and qr_text is not None:
+                    if order_queue is not None:
+                        print('[顺序] 车跑到新的一站，tag 顺序从头来')
+                    order_queue = parse_tag_order(qr_text, args.order_group)
+                    order_miss_since = None
             elif ev == 'stuck':
                 print(f'[微调] 上一发发出去 {args.align_return_timeout:.0f}s 没等到下位机'
                       f'回到 0x01，这一站不再挪车了'
@@ -1824,6 +2023,23 @@ def main():
                         qr_done_episode = state_episode
                     elif cmd == CMD_GRAB:
                         last_grab = now
+                        # tag 顺序往前挪一位。**跟黑名单一个口径：不看 sent_real** ——
+                        # 干跑时状态机走的路要和线上一样，不然桌面上测出来的顺序对不上车
+                        if order_queue:
+                            wanted = order_queue.pop(0)
+                            got = COLOR_CN.get(target_color, target_color) \
+                                if target_color else '认不出颜色'
+                            if target_color == wanted:
+                                print(f'[顺序] 抓走一个：顺序里的{COLOR_CN[wanted]}色，'
+                                      f'剩 {len(order_queue)} 个：'
+                                      + (' → '.join(COLOR_CN.get(c, c) for c in order_queue)
+                                         if order_queue else '（这一批完了）'))
+                            else:
+                                print(f'[顺序] ⚠ 抓走一个，但**不是顺序里的颜色**：'
+                                      f'顺序要的是{COLOR_CN[wanted]}色，实际抓的是{got}；'
+                                      f'剩 {len(order_queue)} 个：'
+                                      + (' → '.join(COLOR_CN.get(c, c) for c in order_queue)
+                                         if order_queue else '（这一批完了）'))
                         # 这个颜色抓过了，底下压着的那个同色的圆别再抓（--color-policy once）。
                         # 不看 sent_real：跟 last_grab 一个口径 —— 干跑时状态机走的路
                         # 要和线上一样，不然桌面上测出来的行为对不上车
@@ -1897,6 +2113,11 @@ def main():
                                 txt, tcol = 'AIMED: grab', (0, 255, 0)
                             cv2.putText(view, txt, (8, view.shape[0] - 12),
                                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, tcol, 2)
+                    # tag 顺序还剩哪几个（数字好认，中文 putText 画不了）
+                    if order_queue:
+                        cv2.putText(view, 'order '
+                                    + '>'.join(COLOR_CODE.get(c, '?') for c in order_queue),
+                                    (8, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
                     head = 'material'
                 else:
                     head = 'tag'
@@ -1967,8 +2188,18 @@ def main():
                             still += '（微调关着，照抓）'
                     else:
                         still += ' **已对准**'
+            # tag 顺序：还剩哪几个颜色没抓、队首那个在不在画面里（不在就是压着不抓）
+            if order_queue:
+                ord_stat = '  顺序 ' + '→'.join(COLOR_CN.get(c, str(c)) for c in order_queue)
+                if order_miss_since is not None:
+                    ord_stat += (f'（该抓{COLOR_CN.get(order_queue[0], "?")}色，'
+                                 f'画面里没有，已等 {now - order_miss_since:.1f}s）')
+            elif order_queue is not None:
+                ord_stat = '  顺序 抓完了（等新的一站/新 tag）'
+            else:
+                ord_stat = ''
             print(f'[状态] 循环 {frames / elapsed:.1f}Hz  相机 {cam_stat}  '
-                  f'下位机 {st}{still}  收到帧 {rx or "无"}')
+                  f'下位机 {st}{still}{ord_stat}  收到帧 {rx or "无"}')
             frames, t0 = 0, time.time()
 
     for wk in workers:
