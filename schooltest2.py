@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""校赛测试脚本 2：tag 识别 + 物料（颜色大区域）识别 + 0x20/0x21 握手
+"""校赛测试脚本 2：tag 识别 + 物料（找圆）识别 + 0x20/0x21 握手
 
 基于校赛版本的 serial_tag.py，多了四件事：
 
 1. **两路相机**：tag 和物料各一路，分别开、分别识别。
        tag 相机     -> QR 识别（车到停顿点之前就要认出来）
-       物料相机     -> 颜色大区域（对着转盘上的物料）
+       物料相机     -> 找圆（对着转盘上的物料）
    两路的设备、分辨率、帧率都能单独给，互不影响。哪路挂了另一路照跑。
    派上现在：物料 = USB "2M"（/dev/video0），tag = USB "Integrated Webcam"（/dev/video2）。
 
@@ -16,36 +16,95 @@
    也能直接给路径或 /dev/v4l/by-id 里的名字。--list 会把现在的节点和名字都打出来。
    UVC 摄像头一般 index0 = 取流节点、index1 = metadata，别开错。
    注意 /dev/video19 挂在 rpivid 下面是硬件解码器，不是相机。
+   片段短了会**同时命中好几块板子**（笔记本上 "Integrated" 一下命中内置摄像头、
+   内置红外、和刚插的 USB 摄像头），这时脚本**不开**，把候选板卡名和能直接抄的
+   写法打出来让你挑 —— 随便挑一个的话开起来的多半是笔记本自己那个，而且它的
+   取流节点根本不出帧，表现成"相机明明插着却没画面"（2026-09-18 就是这么踩的）。
+   **相机没起来不退出**：每 CAM_RETRY_INTERVAL 秒重新解析 + 重开一次，每轮都打
+   一遍感叹号框住的提醒（跟串口没连上那条一个口径），状态行里也一直挂着
+   "**没开起来**"。插晚了、换 USB 口、节点号漂了都会自己接上，不用重启脚本。
 
 3. 物料识别：**看图里的圆**。物料是回转体，投影是圆（斜看是椭圆），
-   所以用 HoughCircles 找圆，检出圆的就算物料。
+   所以用 HoughCircles 找圆，检出圆的就算物料 —— **不需要特定 HSV**，认出圆就发。
    颜色**不参与判断**，只是附带的信息：把圆内占比最高的那种颜色打出来，
    让你知道抓的是哪一块；认不出颜色（比如黑物料、光照太偏）也照样认，不影响。
+   每行还会打**整个圆内的平均 HSV**（跟颜色阈值表无关），就是给你照着调阈值的。
    颜色编号：红1 黄2 蓝3 绿4 黑5 浅蓝6，规则里每轮抽签只用其中三种。
    半径范围跟分辨率绑死，换分辨率要重标（启动时会打印实际用的像素值）。
 
 4. 和电控的握手（见 USART1_Cmd_Protocol.md）—— 这就是"什么时候能发"：
        0x20 指令状态(下→上, 1B, 每 100ms 上报一次)
            0x00 等待二维码     → 上位机可以发 0x21 cmd=0x01(识别完毕,继续行进)
-           0x01 等待颜色信息   → 上位机可以发 0x21 cmd=0x02(抓取一次)
-                                还要**等圆停稳**才发：物料停下才好抓，所以圆连续
+           0x01 等待抓取指令   → 下位机停下来在等抓取。识别到圆 → **先对准**
+                                （见第 5 条）→ 对准了发 0x21 cmd=0x02(抓取一次)。
+                                另外还要**等圆停稳**：物料停下才好抓，所以圆连续
                                 --still-time 秒不动（--still-tol 像素内）才发，
                                 还在动就等（终端会打"圆稳 x/y 秒"）。
+                                想"一看到就动"就 --still-time 0（微调和对准也
+                                跟着这个门槛走）。
            0x10 运动中         → 不要发指令打扰，必须发就发 0x00(空指令,兼心跳)
        0x21 指令下发(上→下, 1B)  帧长固定 5 字节
    tag 不受状态影响，识别到就发（burst 5 次，和校赛版一样）；
    指令是**动作**，一次只发一发，绝不 burst（连发 5 次 = 抓 5 次）。
 
+5. 抓之前先对准：圆停稳了但没在**对准点**上（默认画面正中，--aim-x/--aim-y 挪），
+   就发底盘微调指令把车挪过去 —— 0x21 的指令字多四个：0x30 前 / 0x31 后 /
+   0x32 左 / 0x33 右（和 00/01/02 共用第 5 个字节，帧长一样是 5 字节）。
+   圆心**横竖各自进了自己的容差**才算对准（--aim-tol-x 左右 / --aim-tol-y 前后，
+   两个轴分开设），这时才允许发抓取。谁超了自己的容差就修谁；两个都超就修误差大的那个。
+   **微调只在 0x20 状态 = 0x01 时发**：那是下位机停下来等指令的时刻，
+   0x00 还在等二维码、0x10 正在按轨迹走，都不该去挪底盘。
+   一次只发一条（前后+左右同时发会斜着走），而且**发完要等它回到 0x01 才发下一发**：
+   下位机挪的时候把上报切成 0x10，那期间发出去的微调会被**静默丢弃**（不计错、
+   不缓存），所以"发完 sleep 再发下一条"会少走几厘米而且没有任何报错。
+   节拍由下位机的 0x01 给，别自己定（见 USART1_Nudge_Protocol.md §四/§五）。
+   一次停稳里最多发 --align-max 条（0=不限）——对不上就别一直挪，
+   免得车照着个假圆一路挪出去。**发满了不再挪，但照样抓**：
+   抓偏一点总比整轮卡在这儿不抓好（原因会打在终端上）。
+
+   方向约定：画面**摆正之后**（见 --cam-rot），画面上方 = 车头前方。
+   圆心偏画面右 → 物料在车右边 → 发右(0x33)；偏下 → 物料比对准点离车近 →
+   发后(0x31)。这跟相机是朝前看还是朝下看无关，只要求画面摆正、上方朝车头。
+   拿不准就先看预览：物料窗口里画了黄色十字(对准点)，还有一条从十字指向物料圆心
+   的箭头（= 车要往哪边挪），右下角写着这一刻要发哪个方向。
+   箭头方向跟实际挪的方向反了，就是朝向没摆正/装反了，改 --cam-rot。
+
+   相机装歪了就靠 --cam-rot 摆正：0=正着装，1=相机逆时针转了90°（**默认**，
+   车上现在就是这么装的），2=转180°，3=顺时针90°。转的是**相机怎么转的**，
+   脚本会把画面反着转回来，所以预览里看到的就已经是摆正的画面
+   （识别、对准全在摆正后的画面上做）。tag 那一路相机单独一个开关 --tag-cam-rot。
+
+6. 状态是 0x01 但**一个圆都看不到**（车停偏了、物料没进画面）：连续
+   --search-interval 秒（默认 2s）没圆，就往前拱一小步找找 —— 还是 3 cm 一步、
+   走同一条 0x30 通道，所以节拍照样听下位机的 0x01，不能连发；一次停稳里最多
+   --search-max 发（默认 3），这几发也占 --align-max 的总预算。
+   找满还是没圆就**不再往前、也不盲抓**，停着等（终端会打为什么）——
+   没圆就不知道物料在哪，盲抓既可能空抓也可能撞到东西。跟着 --align-enable 走：
+   那个总开关关着就一条都不发（也不往前找）。
+
+7. 同一个颜色能不能重复抓（--color-policy，默认 once，启动时选）：
+   **once**（默认）= 抓过的颜色不再抓。物料底下压着一个**同色**的圆（定位圆/靶心），
+   物料被抓走以后那个圆还在画面里，看着还是个同色的圆 —— 再抓一次就是空抓。
+   所以真发过一次抓取就把那个颜色记下来，之后同色的圆**不再抓**；但**照样算"看到圆"**
+   （停稳、对准照走，车不会因为滤掉一个圆去触发第 6 条的往前找），只是最后压住不发 0x02。
+   画面里还有别的没抓过的颜色时自动改抓那个（谁大抓谁）。**车自己跑到新的一站**
+   就清空重来（NudgePacer 的 'station' 事件：离开 0x01 超过 ALIGN_NEW_STOP_GAP 才
+   回来 = 车真开走了一段路）。不能用"回到 0x01"当换站信号 —— 虽然协议 §四 里三次
+   抓取全程都是 0x01（抓取本身不触发 'station'），但下一站不一定停在二维码点，
+   可能直接就是下一个抓取点，等 0x00 再清就晚了，同一色的物料会抓不着。
+   **repeat** = 同色的圆照抓（老行为）：同一站又来了一个同色物料时用得上，
+   代价是底下那个同色定位圆也可能被当成物料再抓一次。
+
 用法：
     python3 schooltest2.py --list                  # 看这台机器上有哪些摄像头
-    python3 schooltest2.py                         # 默认两路都开，只打印不发
+    python3 schooltest2.py                         # 默认两路都开，真发给下位机
     python3 schooltest2.py --dev 'name:2M' --tag-dev 'name:Integrated'
     python3 schooltest2.py --dev /dev/video0       # 也可以直接给节点
     python3 schooltest2.py --tag-dev ''            # 只开物料相机
     python3 schooltest2.py --dev '' --tag-dev 'name:Integrated'   # 只开 tag 相机
     python3 schooltest2.py --width 1280 --height 720 --area 6000
     python3 schooltest2.py --rx-log                # 把下位机发来的每一帧都打出来
-    python3 schooltest2.py --send                  # 真的发（先干跑看清楚了再开）
+    python3 schooltest2.py --dry-run               # 只打印不发给下位机（默认是真发）
 """
 
 import argparse
@@ -70,14 +129,56 @@ import serial
 # 也可以直接给设备路径 /dev/videoN，或给 /dev/v4l/by-id 里的名字。
 # 注意：/dev/video19 挂在 rpivid 下面是硬件解码器，不是相机。
 MATERIAL_DEV = 'name:2M'
-TAG_DEV = 'name:Integrated'
+TAG_DEV = 'name:WebCam'
 VIDEO_INDEX = 0        # UVC 一般 index0 = 取流节点，index1 是 metadata
 
 V4L_BY_ID = '/dev/v4l/by-id'
 V4L_BY_PATH = '/dev/v4l/by-path'
 V4L_SYSFS = '/sys/class/video4linux'
 
+# 相机没找到 / 打不开的时候：**不退出**，每这么多秒重来一轮，每轮都打一遍显著提醒。
+# 跟串口没连上那条一模一样（见 McuLink._loop）—— 插晚了、换了个 USB 口、节点号变了，
+# 都能自己接上，不用重启脚本。**相机的事只报一次是不够的**：日志一滚、窗口一黑，
+# 人就对着屏幕猜（2026-09-18 的内置摄像头被当成 tag 相机开了起来，就是这么看走眼的）。
+CAM_RETRY_INTERVAL = 5.0
+CAM_READ_FAIL_MAX = 100  # 连续这么多帧读不到就判定"这一路掉了"（约 1s）→ 重开、重解析节点。
+                         # 拔了/被别的程序抢了会走到这儿；重插上就自己回来
+
 CAMERA_FOURCC = 'MJPG'  # 不压缩(YUYV)在 640x480 就只有 ~5-10fps，MJPG 才能跑满
+
+# ---- 物料相机(M2)的曝光：默认就调，只调这一路 ----
+# 为什么非调不可：这颗 2M 模组出厂是 auto_exposure=3(Aperture Priority)，不管它就会冲爆，
+# 黄色物料糊成白块，HSV 判据直接失效（"曝光太厉害"就是这个）。
+#
+# 实测（这台机器的 /dev/video4，640x480 MJPG）——**这颗模组只有一个真旋钮：brightness**：
+#   brightness 单调、线性得漂亮，1 格 ≈ 1 个 V。同一个桌面同一天，hue=0：
+#        -32 → V中位59  过曝 0.7%  压黑40%   红盘 S 194
+#        -16 → V中位76  过曝 3.8%  压黑31%   红盘 S 180
+#          0 → V中位93  过曝28.5%  压黑18%   红盘 S 164   ← 原来填的就是这个
+#        +32 → V中位128 过曝38.5%  压黑 0%   红盘 S 131
+#        +64 → V中位162 过曝41.3%  压黑 0%   红盘 S  99
+#     **看最后那列**：越亮饱和度越低。HSV_RANGES 里每种颜色都有 S 下限，画面一冲爆，
+#     物料的 S 就掉到门槛以下 —— 这就是"曝光不对"表现成"HSV 判据失效"的原因，
+#     压亮度能同时把过曝和掉饱和度一起治好。
+#   auto_exposure 是**死控制**：1(手动)/3(自动) 反复切三轮，V中位
+#        107→95→95→94→94→94，之后就一点不动。写 manual 并不像原来注释说的那样
+#        "不让它自己发挥"，该多亮还是多亮。照写（别的模组上是对的），但别指望它。
+#   exposure_time_absolute 也是**死控制**：78/312/1250/5000 换着写、重开设备再写，
+#        V中位一个像素都不变。设了能读回来，就是没接上。
+#   hue 是**活的**，出厂 0；这台机器上被探控件时留在了 2000(顶格)，画面整个转色
+#        （红盘变橙、蓝杯变紫、绿垫变青，存图对比过）。脚本以前从不设 hue ——
+#        在 PC 上调好的 HSV 表搬到车上（那边是出厂 0）颜色根本对不上。所以现在
+#        **开机就把 hue 钉到 MAT_HUE**，两台机器看到一样的颜色，表才搬得动。
+#
+# 结论：嫌亮嫌暗就改 MAT_BRIGHTNESS（唯一真旋钮）。开机后脚本会打一行"曝光体检"，
+# 照着那行的过曝% 调，别靠眼睛。tag 相机（Integrated）不用调，保持它自己的默认。
+MAT_AUTO_EXPOSURE = 'manual'  # 'manual'=设成手动 / 'auto'=设成自动 / None=不碰。
+                              # 注：这颗模组上两种一个样（见上面实测），留着是给别款相机用的
+MAT_HUE = 0                   # 色相，-2000~2000，出厂 0。钉死到 0 是为了 PC 和车上
+                              # 看到同一个颜色（--hue）。**在 PC 上调 HSV 表之前先确认这行是 0**
+MAT_BRIGHTNESS = -48          # 亮度，-64~64，驱动默认 0。**唯一真旋钮**，1 格 ≈ 1 个 V（--brightness）
+MAT_GAIN = None               # 增益。这颗模组没暴露 gain 控制，填了也是静默失败（会打"没设上"）
+MAT_EXPOSURE = None           # 曝光(绝对)。**在这颗模组上是死的**，填了没用，留着是为了别款相机
 
 # ---------------- 串口 / 协议 ----------------
 PORT = '/dev/ttyUSB0'
@@ -86,25 +187,140 @@ FRAME_HEADER = b'\xAA\x55'
 TYPE_TAG = 0x03
 TAG_DATA_LEN = 12
 
-# 握手：USART1_Cmd_Protocol.md
+# 握手：USART1_Cmd_Protocol.md（微调那组在 USART1_Nudge_Protocol.md）
+# 注：0x01 在微调协议/下位机代码里也叫"等待颜色信息"，同一个状态两种叫法。
 TYPE_STATE = 0x20      # 下→上，指令状态
 TYPE_CMD = 0x21        # 上→下，指令
 CMD_LEN = 1
 STATE_WAIT_QR = 0x00       # 等待二维码
-STATE_WAIT_COLOR = 0x01    # 等待颜色信息
+STATE_WAIT_GRAB = 0x01     # 等待抓取指令（下位机停下来在等 0x02）
 STATE_MOVING = 0x10        # 运动中
 CMD_IDLE = 0x00            # 空指令 / 心跳填充（不动作）
 CMD_QR_DONE = 0x01         # 二维码识别完毕，继续行进
 CMD_GRAB = 0x02            # 抓取一次
+# 底盘微调。**和 00/01/02 共用 0x21 那一个指令字**（帧长一样是 5 字节
+# AA 55 21 01 xx），不是新的类型。只在 0x20 状态 = 0x01 时才发（见 decide）。
+# 协议以 USART1_Nudge_Protocol.md / 电控代码为准（那份是自包含的，能单独发给对接的人）：
+#   - 一发 = 朝该方向走 **3 cm** 后自己停，上位机**不传距离**，想走 9cm 就发三次；
+#   - 微调期间下位机把上报切成 0x10，走完（约 0.3s）自动切回 0x01 —— **看到 0x01
+#     = 上一发走完了**；没回到 0x01 就发的会被**静默丢弃**（不计错、不缓存）。
+#     所以节拍不能按定时器硬发，详见 decide 里 ALIGN_INTERVAL 那段。
+CMD_ADJUST_FWD = 0x30      # 底盘微调：前
+CMD_ADJUST_BACK = 0x31     # 后
+CMD_ADJUST_LEFT = 0x32     # 左
+CMD_ADJUST_RIGHT = 0x33    # 右
+ADJUST_CMDS = (CMD_ADJUST_FWD, CMD_ADJUST_BACK, CMD_ADJUST_LEFT, CMD_ADJUST_RIGHT)
+LEGAL_CMDS = (CMD_IDLE, CMD_QR_DONE, CMD_GRAB) + ADJUST_CMDS   # 0x21 指令字的白名单
 
 STATE_TIMEOUT = 0.5        # 下位机 100ms 一发，超过这么久没收到就当状态未知：不发指令
-GRAB_COOLDOWN = 1.5        # 同一次"等待颜色信息"里，两次"抓取一次"至少隔这么久
+GRAB_COOLDOWN = 1.5        # 同一次"等待抓取指令"里，两次"抓取一次"至少隔这么久
 
-# 圆停稳判定：物料停下来才好抓，所以"等待颜色信息"时还要等圆在画面里不动了才发 0x02。
+# ---------------- 相机朝向 / 对准（微调） / 停稳 ----------------
+# 这块是"把物料挪到该在的位置"的全部可调值。车上装好了就不用动；
+# 相机重新装过、或者换了个抓取位置，就改这里（命令行也能覆盖，但默认走这里）。
+
+# 相机是"怎么转着装的"，脚本会把画面反着转回来，所以预览里已经是摆正的画面。
+#   0 = 正着装
+#   1 = 相机**逆时针转了 90°**（画面里东西是顺时针躺着的）
+#   2 = 转了 180°（画面上下颠倒）
+#   3 = 顺时针转了 90°
+# 转回来之后才做识别 / 画预览 / 算方向，所以下面的方向约定不用管相机怎么装的。
+CAM_ROT = 0               # 物料相机（--cam-rot）
+# 底盘微调（0x30~0x33）总开关。车上默认**开着** —— 微调已经是默认流程的一部分
+# （协议见 USART1_Nudge_Protocol.md）：
+#   True  = 误差超过各自的容差（AIM_TOL_X / AIM_TOL_Y）就发微调，挪进去再抓取
+#           （一次一发，等它回 0x01）
+#   False = 只对准不动车 —— 圆没对准也**不发微调**，按"还差多少像素"报出来，照抓
+# 想临时不挪车（比如下位机那套还没烧上），命令行 --no-align-enable 就行，不用改这里。
+ALIGN_ENABLE = True       # （--align-enable / --no-align-enable）
+TAG_CAM_ROT = 0            # tag 相机，单独一个（--tag-cam-rot）
+CAM_ROT_CN = {0: '正装(画面不转)', 1: '相机逆时针转了90°', 2: '相机转了180°',
+              3: '相机顺时针转了90°'}
+
+# 对准点 = 想让物料停在画面的哪个位置。两个轴**各自独立**，都是：
+#   -1 = 自动取这一轴的正中（640x480 就是 x=320 / y=240）
+#   给了像素值就用给的 —— 想让准星**往下**移，就是把 AIM_Y 往**大**改。
+# 相机装的位置和机械臂的抓取点对不上时，量一下差多少像素挪这里（预览里画着准星）。
+AIM_X = 290                 # （--aim-x）
+AIM_Y = 250                # （--aim-y）280 = 正中(240)再往下 40px。
+                           # 每 +10 准星往下 10px；想回正中写 -1
+# 对准容差，**左右和前后分开**（两个轴各管各的）：
+#   AIM_TOL_X = 左右的容差（画面横轴，超了就发 0x32 左 / 0x33 右）
+#   AIM_TOL_Y = 前后的容差（画面纵轴，超了就发 0x30 前 / 0x31 后）
+# 谁超了自己的容差就修谁；两个都超就修误差大的那个；都在容差里才算对准了。
+# 左右可以放得比前后松（横移对抓取的影响小、而且横移那一路下位机不做航向修正），
+# 想收紧哪个就改哪个，另一个不受影响。
+#
+# 但任何一个都**必须 ≥ 半步，不然那个方向一定来回动**：
+#   底盘一步是下位机固定的 3 cm（协议里上位机不传距离），这一步在画面里跨 S 个像素。
+#   容差 T < S/2 时：差一点没进容差 → 挪一步 → 冲过头到另一边 → 再挪回来 → 又冲过头……
+#   永远在容差两侧来回。收敛条件是 T ≥ S/2（半步 = 这套机械的精度上限，≈1.5 cm）。
+# S 是量出来的，不用猜：微调走完一步时终端会打
+#   「走完一步：x 方向差 +190 → +12px（3cm ≈ 178px）」
+# 括号里就是 S，日志还会直接告诉你该填多少（S/2 再多一点）。
+# **两个方向的 S 不一定一样**（横移和前后走的距离标定各是各的），各量各的。
+AIM_TOL_X = 60             # （--aim-tol-x）左右容差，px
+AIM_TOL_Y = 25             # （--aim-tol-y）前后容差，px
+
+# 方向约定：画面**摆正之后**，画面上方 = 车头前方。
+#   圆心偏画面右 → 物料在车的右边 → 发右(0x33)，把车挪过去
+#   圆心偏画面下 → 物料比对准点离车更近 → 发后(0x31)
+# 跟相机朝前看还是朝下看无关，只要求画面摆正、上方朝车头。
+# 反了的话先在预览里看那条黄色箭头指的方向对不对，再回头查 CAM_ROT。
+ALIGN_INTERVAL = 0.6       # 两条微调指令**至少**隔这么久（--align-interval）。
+                           # 注意它**不是节拍** —— 节拍由下位机的 0x01 给
+                           # （见下面的 ALIGN_RETURN_TIMEOUT 和 NudgePacer）；
+                           # 它只是个兜底的最小间隔，防止状态抖动时连发。
+                           # 离线干跑（--dry-run / 串口没连上）时没有状态可等，
+                           # 它就退化成唯一的节拍 —— 和以前的定时器行为一样
+ALIGN_RETURN_TIMEOUT = 3.0 # 发完一发微调后，最多等这么久让它回到 0x01
+                           # （--align-return-timeout）。协议里一发往返只要
+                           # 0.4~0.5 s，3 s 很宽裕。超时 = 这一发压根没生效
+                           # （被门拒了 / 帧丢了），这一站就不再挪车 ——
+                           # 不然会一直对着一个等不到的 0x01 空转
+ALIGN_NEW_STOP_GAP = 1.0   # 离开 0x01 超过这么久才回来 = 车自己跑到新的一站了
+                           # （不是我们挪的那一下）。一发微调只让车走 0.3 s、
+                           # 0x10 也就报 0.4~0.5 s，真跑一段路是好几秒 ——
+                           # 用这个间隔把两者分开，好决定微调次数从哪重新算
+ALIGN_MAX = 12             # 一站（一次停稳）里最多发几条微调（--align-max，0=不限）。
+                           # 用满之后**不再挪车、照抓**：抓偏一点总比整轮卡在这儿不抓好。
+                           # 想让它对不上就一直挪，填 0 —— 但认成假圆时车会照着它
+                           # 一路挪出去，所以默认给个上限
+# 「找不到圆就往前找」：车停偏了、物料压根没进画面时的补救。
+# 等待抓取状态里连续 SEARCH_INTERVAL 秒一个圆都没有，就往前拱一小步（还是 3 cm 一步，
+# 和微调同一条 0x30 通道），一站最多 SEARCH_MAX 发。往前找的这几发**也算进 --align-max
+# 的总预算**（同一套节拍、同一个 pacer），所以别把两个上限都顶满。
+# 找满 SEARCH_MAX 次还是没圆：**不再往前，也不盲抓**，就那么停着等（终端会说为什么）——
+# 没有圆就不知道物料在哪，盲抓一下既可能空抓也可能撞到东西。想改成照抓说一声。
+# 往前找也是在挪车，所以跟着 ALIGN_ENABLE 那个总开关走：关着就一条都不发。
+SEARCH_INTERVAL = 2.0      # 连续这么久没看到圆就往前找一次（--search-interval）
+SEARCH_MAX = 3             # 一站最多往前找几次（--search-max，0=不限）
+# 圆停稳判定：物料停下来才好抓，所以"等待抓取指令"时还要等圆在画面里不动了才发 0x02。
 # 判据是最大的那个圆的圆心/半径连续 STILL_TIME 秒没超出容差（帧间抖动几个像素是正常的）。
-STILL_TIME = 0.5           # 要连续静止多少秒才算停稳（--still-time）
+# 微调也卡在这个门槛上 —— 挪完一步画面会动，所以每条微调之间自然隔开一段。
+STILL_TIME = 0.3           # 要连续静止多少秒才算停稳（--still-time）
 STILL_TOL = 6              # 圆心挪了多少像素就算还在动（--still-tol）
 STILL_R_FRAC = 0.10        # 半径变化超过这个比例也算还在动
+# 「同一个颜色能不能重复抓」——**启动时就选**（--color-policy，默认 once）。
+# 这个是拿来防**空抓**的：物料底下压着一个**同色**的圆（定位圆/靶心），物料被抓走以后
+# 那个圆还在画面里，看着还是一个同色的圆 —— 再抓一次就是空抓（用户 2026-09-18 报的现象）。
+#   'once'   一个颜色在一站里抓过一次就不再抓。同色的圆**不再抓**，但照样算"看到圆"：
+#            停稳、对准照走（车不会因为滤掉一个圆就往前拱），只是最后压住不发 0x02。
+#            拉黑之后画面里又有别的没抓过的颜色时，会自动改抓那个（谁大抓谁，见 pick_target）。
+#   'repeat' 同色的圆照抓（老行为）。同一站**又来了一个同色物料**时用得着 ——
+#            代价是底下那个同色定位圆也可能被当成物料，再抓一次（空抓）。
+# 清空时机：**车自己跑到新的一站**（NudgePacer 的 'station' 事件 = 离开 0x01 超过
+# ALIGN_NEW_STOP_GAP 才回来，见主循环里 ev == 'station' 那一段）。
+# 为什么用这个而不是"回到 0x01"：协议 §四里三次抓取**全程都是 0x01**
+# （发 0x02 → 抓完回 0x01 → 再发 0x02，只有第 3 次抓完才报 0x10 开走），
+# 所以抓取本身不会触发 'station'；能触发的只有"车真的开走了一段路"。
+# 也不能等到报 0x00（等待二维码）才清：下一站**不一定**是二维码点，可能直接就是
+# 下一个抓取点，那会儿还压着黑名单，同一色的物料就抓不着了（用户 2026-09-18 要的
+# 就是"到新的抓取点就清"）。
+COLOR_POLICY = 'once'      # （--color-policy once / repeat）
+                           # once   = 抓过的颜色不再抓（默认，防空抓）
+                           # repeat = 同色的圆照抓（老的"谁大抓谁"）
+
 
 # 类型 -> 数据段长度的白名单。协议里没有 CRC 也没有帧尾，
 # 帧边界只能靠这张表认，所以新类型必须在这里登记，否则会被当成噪声跳过。
@@ -117,23 +333,16 @@ TYPE_LEN = {
 
 TAG_SEND_TIMES = 5     # 和校赛版一样：tag 是数据帧，连着发 5 次，丢一帧也不怕
 
-# 如果电控还要把颜色本身也发过去（状态名叫"等待颜色信息"），
-# 大概率是走 0x03 这条视觉数据通道，12 字节 ASCII 数字。到时候：
-#   1. MATERIAL_TAG 改成 True
-#   2. MATERIAL_TAG_CONTENT 填电控给的内容
-MATERIAL_TAG = False
-MATERIAL_TAG_CONTENT = '000000000000'
-
 # ---------------- 颜色 / 物料 ----------------
 # 阈值表和 src/cv/cv/material.py 保持一致，那边改了这边也要改
 HSV_RANGES = {
     "red":        [((0, 110, 90),   (10, 255, 255)),
                    ((170, 110, 90), (180, 255, 255))],
-    "yellow":     [((20, 110, 110), (33, 255, 255))],
-    "green":      [((38, 70, 60),   (85, 255, 255))],
-    "blue":       [((100, 120, 80), (128, 255, 255))],
-    "light_blue": [((86, 60, 130),  (100, 255, 255))],
-    "black":      [((0, 0, 0),      (180, 90, 45))],
+    "yellow":     [((10, 30, 110), (33, 255, 255))],
+    "green":      [((50, 90, 60),   (80, 255, 255))],
+    "blue":       [((100, 55, 80), (140, 255, 255))],
+    "light_blue": [((86, 30, 130),  (100, 255, 255))],
+    "black":      [((0, 0, 0),      (180, 50, 150))],
 }
 COLOR_ORDER = ["red", "yellow", "green", "blue", "light_blue", "black"]
 COLOR_CN = {"red": "红", "yellow": "黄", "green": "绿",
@@ -145,9 +354,20 @@ COLOR_BGR = {"red": (0, 0, 255), "yellow": (0, 255, 255), "green": (0, 255, 0),
              "blue": (255, 0, 0), "light_blue": (255, 180, 0), "black": (90, 90, 90)}
 
 # --- 圆的判据（物料 = 一个圆）---
-CIRCLE_R_MIN_FRAC = 0.10 # 最小半径 = 帧短边的这个比例（--min-radius 给了像素值就用那个）
+CIRCLE_R_MIN_FRAC = 0.04 # 最小半径 = 帧短边的这个比例（--min-radius 给了像素值就用那个）
 CIRCLE_R_MAX_FRAC = 0.45   # 最大半径 = 帧短边的这个比例
 _DISK_SCALE = 0.85         # 认颜色时取样用的盘 = 检出半径的 0.85（躲开边缘过渡色）
+
+# 物料是**圆台**，投影下来是大小两个圆（底面轮廓 + 顶面），两个都会被 Hough 检出。
+# 它们物理上就是**同一块物料**，必须合成一块 —— 不合并的话 materials[0]（"最大的那个圆"，
+# 对准和停稳判定都看它）会在两帧之间换人：换人了圆心/半径就跳一下，停稳判定每帧都判成
+# "还在动"，车会一直等下去、永远不抓。
+# 合并后**留大的那个**：半径大、圆心更稳，底盘校准用它。
+#
+# 判据是"小圆的圆心落在大圆的盘里"（dist ≤ 大圆半径 × 这个比例），不是"两个圆心几乎重合" ——
+# 圆台斜着看时顶面是偏的：2026-09-18 实测那个红圆台是 r=62@(264,218) 和 r=51@(298,218)，
+# **圆心差 34px**，按"重合"判就合不上。而两块并排的物料圆心至少隔 2 个半径，合不上。
+CONE_MERGE_FRAC = 1.0      # 圆心距 ≤ 大圆半径 × 这个比例 = 同一个圆台的两层（1.0 = 落在大圆盘里）
 
 # HoughCircles 两种方法。**默认 ALT**：合成图上它一个假圆都不出。
 # ALT 的 param2 是"圆的完美度"(0~1，越大越严)；经典 GRADIENT 的 param2 是"累加器票数"，
@@ -169,10 +389,15 @@ HOUGH_DEFAULTS = {
 _MORPH = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
 _MORPH_SMALL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
 
-STATE_CN = {STATE_WAIT_QR: "等待二维码", STATE_WAIT_COLOR: "等待颜色信息",
+STATE_CN = {STATE_WAIT_QR: "等待二维码", STATE_WAIT_GRAB: "等待抓取指令",
             STATE_MOVING: "运动中"}
 CMD_CN = {CMD_IDLE: "空指令(心跳)", CMD_QR_DONE: "二维码识别完毕,继续行进",
-          CMD_GRAB: "抓取一次"}
+          CMD_GRAB: "抓取一次",
+          CMD_ADJUST_FWD: "微调-前", CMD_ADJUST_BACK: "微调-后",
+          CMD_ADJUST_LEFT: "微调-左", CMD_ADJUST_RIGHT: "微调-右"}
+# 微调的英文短名，画在预览里（cv2.putText 画不了中文）
+ADJUST_EN = {CMD_ADJUST_FWD: "FWD", CMD_ADJUST_BACK: "BACK",
+             CMD_ADJUST_LEFT: "LEFT", CMD_ADJUST_RIGHT: "RIGHT"}
 
 
 # ==================== 相机：找设备 ====================
@@ -230,8 +455,24 @@ def list_cameras():
     print('      哪个是取流节点拿不准就一个个试，脚本会告诉你读不读得到帧。')
 
 
-def resolve_device(spec, index=0, by='id'):
-    """把设备说明解析成真实路径。认四种写法，认不出来返回 ''（绝不默默退回 video0）。"""
+def warn_camera(msg):
+    """相机没开起来时的显著提醒（一整条感叹号框住，滚过去了也看得见）。
+
+    跟串口"没连上、5 秒后重试"一个口径：**每轮重试都打一遍**，不是只报一次。
+    """
+    bar = '!' * 68
+    print(f'[相机] {bar}')
+    for line in msg.splitlines():
+        print(f'[相机] !!! {line}')
+    print(f'[相机] {bar}')
+
+
+def resolve_device(spec, index=0, by='id', quiet=False):
+    """把设备说明解析成真实路径。认四种写法，认不出来返回 ''（绝不默默退回 video0）。
+
+    quiet=True 只影响打印：重试时同一个诊断每 5 秒刷一遍会淹掉别的东西，
+    这时只留调用方那一行显著提醒（见 CameraWorker._report）。
+    """
     if not spec:
         return ''
 
@@ -240,9 +481,29 @@ def resolve_device(spec, index=0, by='id'):
         frag = spec[5:].strip()
         hits = [d for d in _video_nodes() if frag.lower() in board_name(d).lower()]
         if not hits:
-            print(f'[相机] 没有板卡名含 "{frag}" 的节点')
-            for d in _video_nodes():
-                print(f'[相机]   {d}  "{board_name(d)}"')
+            if not quiet:
+                print(f'[相机] 没有板卡名含 "{frag}" 的节点')
+                for d in _video_nodes():
+                    print(f'[相机]   {d}  "{board_name(d)}"')
+            return ''
+        # 片段短一点就会**同时命中好几块不同的板子**。笔记本上 "Integrated" 一抓三个：
+        # 内置摄像头、内置红外、还有刚插上的 USB 摄像头。这时候按编号挑第一个，
+        # 开起来的多半就是笔记本自己的那个 —— 而且它取流节点给不出帧，画面全黑。
+        # 用户 2026-09-18 报的"把电脑摄像头当成 tag 相机、还没画面"就是这个。
+        # 所以：命中的板卡名不止一种就**不开**，把现状和能直接抄的写法打出来。
+        # （车上只有一块板子含这个词，写短片段照样能匹配上，不影响）
+        names = sorted({board_name(d) for d in hits})
+        if len(names) > 1:
+            if not quiet:
+                print(f'[相机] "{frag}" 一下子命中了 {len(names)} 块**不同的板卡**，'
+                      f'分不清要哪一块，这一路先不开：')
+                for d in hits:
+                    print(f'[相机]   {d}  "{board_name(d)}"')
+                print('[相机] 把板卡名写长一点就不用猜了（挑只在你要的那块板上出现的词），'
+                      '填进 --dev / --tag-dev：')
+                for n in names:
+                    print(f"[相机]   'name:{n}'")
+                print('[相机] 也可以直接给节点路径（/dev/videoN）。看现状：--list')
             return ''
         aliases = _v4l_aliases()
         # 一块板子一般挂两个节点（取流 + metadata），优先挑 by-id 里带
@@ -250,19 +511,22 @@ def resolve_device(spec, index=0, by='id'):
         pref = [d for d in hits
                 if any(a.endswith(f'-video-index{index}') for a in aliases.get(d, []))]
         pick = pref[0] if pref else hits[0]
-        print(f'[相机] 板卡名含 "{frag}" 的节点: {", ".join(hits)} → 用 {pick}')
-        if len(hits) > 1 and not pref:
-            print(f'[相机] 这几个的板卡名一样，分不出取流/metadata（没有 by-id 别名），'
-                  f'先按编号小的来；要是读不到帧就换 {hits[1]} 试试')
+        if not quiet:
+            print(f'[相机] 板卡名含 "{frag}" 的节点: {", ".join(hits)} → 用 {pick}')
+            if len(hits) > 1 and not pref:
+                print(f'[相机] 这几个的板卡名一样，分不出取流/metadata（没有 by-id 别名），'
+                      f'先按编号小的来；要是读不到帧就换 {hits[1]} 试试')
         return os.path.realpath(pick)
 
     # 1) 直接给路径（/dev/video0、/dev/v4l/by-id/xxx）
     if spec.startswith('/dev/'):
         if os.path.exists(spec):
             dev = os.path.realpath(spec)
-            print(f'[相机] {spec} -> {dev}')
+            if not quiet:
+                print(f'[相机] {spec} -> {dev}')
             return dev
-        print(f'[相机] {spec} 不存在')
+        if not quiet:
+            print(f'[相机] {spec} 不存在')
         return ''
 
     # 2) 给 by-id / by-path 里的名字（-video-indexN 可带可不带）
@@ -271,34 +535,44 @@ def resolve_device(spec, index=0, by='id'):
         link = os.path.join(v4l_dir, name)
         if os.path.exists(link):
             dev = os.path.realpath(link)
-            print(f'[相机] {name} -> {dev}')
+            if not quiet:
+                print(f'[相机] {name} -> {dev}')
             return dev
 
     # 3) 名字对不上（换机器/换摄像头）：把现状打出来，别瞎猜
-    print(f'[相机] {v4l_dir} 里没有 {spec}（-video-index{index}）')
     entries = sorted(os.listdir(v4l_dir)) if os.path.isdir(v4l_dir) else []
+    if not quiet:
+        print(f'[相机] {v4l_dir} 里没有 {spec}（-video-index{index}）')
+        if not entries:
+            print(f'[相机] {v4l_dir} 不存在或为空（用 --list 看现状）')
+        else:
+            print('[相机] 当前可用：')
+            for e in entries:
+                print(f'         {e} -> {os.path.realpath(os.path.join(v4l_dir, e))}')
     if not entries:
-        print(f'[相机] {v4l_dir} 不存在或为空（用 --list 看现状）')
         return ''
-    print('[相机] 当前可用：')
-    for e in entries:
-        print(f'         {e} -> {os.path.realpath(os.path.join(v4l_dir, e))}')
 
     suffix = f'-video-index{index}'
     same = [e for e in entries if e.endswith(suffix)]
     if len(same) == 1:
-        prefix = same[0][:-len(suffix)]
-        print(f'[相机] 名字对不上，但只有 {same[0]} 一个取流节点，先用它')
-        print(f'[相机] 想固定住就把设备名设成 {prefix}')
+        if not quiet:
+            print(f'[相机] 名字对不上，但只有 {same[0]} 一个取流节点，先用它')
+            print(f'[相机] 想固定住就把设备名设成 {same[0][:-len(suffix)]}')
         return os.path.realpath(os.path.join(v4l_dir, same[0]))
-    print(f'[相机] 匹配到 {len(same)} 个取流节点，分不清哪个是哪个，'
-          f'直接给设备路径（同型号撞名就用 --by path）')
+    if not quiet:
+        print(f'[相机] 匹配到 {len(same)} 个取流节点，分不清哪个是哪个，'
+              f'直接给设备路径（同型号撞名就用 --by path）')
     return ''
 
 
 def open_camera(dev, width, height, fps, fourcc):
-    """MJPG 一定要在设分辨率之前设，很多摄像头换了尺寸就不认后面的格式。"""
-    cap = cv2.VideoCapture(dev)
+    """MJPG 一定要在设分辨率之前设，很多摄像头换了尺寸就不认后面的格式。
+
+    必须点名 CAP_V4L2：这台机器上 OpenCV 默认会挑 GStreamer 后端，它只认尺寸/帧率
+    的 caps，**格式和曝光这些控制全部丢掉** —— 冷机开机（设备默认 1920x1080 YUYV@5）
+    时尺寸也会协商失败，于是一路 1920x1080@5 跑着，看着像"能出图"，其实又糊又慢。
+    """
+    cap = cv2.VideoCapture(dev, cv2.CAP_V4L2)
     if not cap.isOpened():
         return None
     if fourcc:
@@ -327,10 +601,11 @@ AUTO_EXPOSURE_AUTO = 3
 
 
 def apply_ctrls(cap, dev, ctrls):
-    """设亮度/增益/曝光，并读回来核对 —— 摄像头不认这个控制时 cap.set 是静默失败的，
+    """设色相/亮度/增益/曝光，并读回来核对 —— 摄像头不认这个控制时 cap.set 是静默失败的，
     不打回来的话你会以为设上了。
 
-    注意：曝光要先把自动曝光关掉才设得进去，顺序不能反。
+    别纠结 auto_exposure 和 exposure 谁先设：这颗 2M 模组上两个都是死控制（见文件顶上的实测），
+    先设后设、设不设都一样，真正改变画面的只有 brightness。
     """
     ae = ctrls.get('auto_exposure')
     if ae is not None:
@@ -338,7 +613,8 @@ def apply_ctrls(cap, dev, ctrls):
                 AUTO_EXPOSURE_AUTO if ae == 'auto' else AUTO_EXPOSURE_MANUAL)
 
     failed = False
-    for name, prop in (('brightness', cv2.CAP_PROP_BRIGHTNESS),
+    for name, prop in (('hue', cv2.CAP_PROP_HUE),
+                       ('brightness', cv2.CAP_PROP_BRIGHTNESS),
                        ('gain', cv2.CAP_PROP_GAIN),
                        ('exposure', cv2.CAP_PROP_EXPOSURE)):
         want = ctrls.get(name)
@@ -358,6 +634,35 @@ def apply_ctrls(cap, dev, ctrls):
               f'（读到 {cap.get(cv2.CAP_PROP_AUTO_EXPOSURE):g}）')
 
 
+def exposure_check(cap, dev, ctrls, frames=20):
+    """开完相机量一张的亮度分布，打一行"曝光体检"。
+
+    曝成什么样只有量出来才知道：这颗模组上 auto_exposure/exposure 都是死控制，
+    唯一的旋钮是 brightness，所以直接给一行数字照着调，别靠眼睛看预览。
+    判据（都是实测出来的）：过曝 >10% 就偏高 —— HSV_RANGES 里每种颜色都有 S 下限，
+    画面一冲爆物料的饱和度就掉到门槛以下，"曝光不对"就是这么表现成"HSV 判据失效"的。
+    """
+    f = None
+    for _ in range(frames):
+        ret, fr = cap.read()
+        if ret and fr is not None:
+            f = fr
+    if f is None:
+        return
+    v = cv2.cvtColor(f, cv2.COLOR_BGR2HSV)[:, :, 2]
+    med = float(np.median(v))
+    hot = float((v >= 250).mean()) * 100
+    dark = float((v <= 30).mean()) * 100
+    br = ctrls.get('brightness')
+    knob = f'brightness 现在 {br:g}' if br is not None else '这一路没设 brightness'
+    print(f'[相机] {dev} 曝光体检: V中位 {med:.0f}  过曝 {hot:.1f}%  压黑 {dark:.1f}%'
+          f'（{knob}）')
+    if hot > 10:
+        print(f'[相机] 过曝 {hot:.1f}% 偏高：把 brightness 往负调，1 格 ≈ 1 个 V')
+    elif med < 60:
+        print(f'[相机] 画面偏暗（V中位 {med:.0f}）：把 brightness 往正调')
+
+
 def list_ctrls_hint(dev):
     """这台摄像头支持哪些控制、范围多少，只有驱动知道 —— 让它自己说。"""
     print(f'[相机] 想看清楚 {dev} 支持哪些控制/范围，在树莓派上跑：'
@@ -372,13 +677,20 @@ class CameraWorker(threading.Thread):
     主循环只做协议判断、不碰摄像头，这样 100ms 的状态上报不会被读帧拖慢。
     """
 
-    def __init__(self, role, dev, width, height, fps, fourcc, hp=None, ctrls=None):
+    def __init__(self, role, dev, width, height, fps, fourcc, hp=None, ctrls=None,
+                 cam_rot=CAM_ROT, spec='', video_index=VIDEO_INDEX, by='id'):
         super().__init__(daemon=True)
         self.role = role               # 'tag' 或 'material'
-        self.dev = dev
+        self.dev = dev                 # 解析好的节点路径。'' = 还没解析出来 / 掉了，
+                                       # 每 CAM_RETRY_INTERVAL 秒重新解析一次
+        self.spec = spec or dev        # 用户给的设备说明（'name:xxx' / /dev/videoN / by-id 名）
+        self.video_index, self.by = video_index, by
         self.width, self.height = width, height
         self.fps_want, self.fourcc = fps, fourcc
         self.ctrls = ctrls or {}       # 亮度/增益/曝光（没给就不碰）
+        self.cam_rot = cam_rot         # 相机是怎么转着装的，默认取 CAM_ROT：
+                                       #   0=正装(画面不转)  1=逆时针90°(现在的车)
+                                       #   2=180°  3=顺时针90°
         self.hp_in = hp or default_hp()   # Hough 参数（0=auto，按分辨率换算）
         self.hp = {}                   # 换算后的实际值，预热完填上
         self.lock = threading.Lock()
@@ -387,8 +699,13 @@ class CameraWorker(threading.Thread):
         self._materials = []           # 物料路：检出的圆 Circle
         self._fps = 0.0
         self._proc_ms = 0.0
-        self.error = ''
+        self.error = ''                # 非空 = 这一路现在没在出帧（线程会自己重试）
+        self.tries = 0                 # 试了几轮。第一轮打全，之后每轮只打一行，别刷屏
         self._running = True
+
+    def up(self):
+        """这一路现在能用吗。**随时会变**：线程每一轮重试都可能把 error 清掉。"""
+        return not self.error
 
     def stop(self):
         self._running = False
@@ -414,14 +731,50 @@ class CameraWorker(threading.Thread):
             self.error = f'线程崩了: {e!r}'
             traceback.print_exc()
 
+    def _report(self, msg):
+        """这一路现在起不来：error 记下来（主循环的状态行会显示"没开起来"），
+        再打一条**显著**提醒。每轮重试都打一遍 —— 跟串口没连上那个一个口径。"""
+        self.error = msg
+        warn_camera(f'{self.role} 这一路没开起来（第 {self.tries} 次试）：{msg}\n'
+                    f'每 {CAM_RETRY_INTERVAL:.0f}s 重试一次，插上/换口/节点变了都会自己接上；'
+                    f'看设备现状用 --list')
+
+    def _retry_wait(self):
+        """等下一轮重试。拆成小步睡，stop() 一叫就能马上退出来。"""
+        for _ in range(int(CAM_RETRY_INTERVAL / 0.1)):
+            if not self._running:
+                return
+            time.sleep(0.1)
+
     def _run(self):
+        # 起不来就每 CAM_RETRY_INTERVAL 秒重来一轮：相机没插、插晚了、USB 口换了、
+        # 枚举顺序变了（节点号从 video5 变成 video4）都能自己接上，不用重启脚本。
+        # 串口那边就是这么干的（McuLink._loop），相机这边原来只报一次就再也不管了。
+        while self._running:
+            if self._run_once():
+                return                      # 正常退出（stop 了）
+            self._retry_wait()              # 这一轮没起来：等一下再来
+
+    def _run_once(self):
+        """开相机 + 跑到 stop 为止。返回 True = 正常结束；False = 这一轮没跑起来，该重试。"""
+        self.tries += 1
+        quiet = self.tries > 1              # 重试时别再刷一遍一屏诊断
+        if not self.dev:
+            # 每次重试都重新解析：节点号是会变的（插拔之后 video5 可能变成 video4），
+            # 死抱着开机时的路径重试，就永远开不起来了
+            self.dev = resolve_device(self.spec, self.video_index, self.by, quiet=quiet)
+            if not self.dev:
+                self._report(f'相机没找到：设备说明是 {self.spec!r}')
+                return False
         cap = open_camera(self.dev, self.width, self.height, self.fps_want, self.fourcc)
         if cap is None:
-            self.error = f'打不开 {self.dev}'
-            return
+            dev, self.dev = self.dev, ''    # 清掉路径，下一轮重新解析（可能已经拔了）
+            self._report(f'打不开 {dev}（不在了？被别的程序占着？）')
+            return False
 
         if self.ctrls:
             apply_ctrls(cap, self.dev, self.ctrls)
+            exposure_check(cap, self.dev, self.ctrls)
 
         # 预热，顺便确认这个节点真的出帧。能 open 但永远没帧的节点不少：
         # UVC 的 metadata 节点、rpivid 那种硬件解码器节点，都是这样。
@@ -429,14 +782,21 @@ class CameraWorker(threading.Thread):
         for _ in range(10):
             ret, f = cap.read()
             if ret and f is not None:
-                first = f
+                first = rot_frame(self.cam_rot, f)     # 先转正，后面全按转正的算
                 break
         if first is None:
-            self.error = (f'{self.dev} 打得开但读不到帧 —— 这个节点多半不是取流节点。'
-                          f'用 v4l2-ctl -d {self.dev} --list-formats-ext 确认，'
-                          f'要的是带 Video Capture + YUYV/MJPG 的那一组')
+            dev, self.dev = self.dev, ''
             cap.release()
-            return
+            self._report(f'{dev} 打得开但读不到帧 —— 这个节点多半不是取流节点。'
+                         f'用 v4l2-ctl -d {dev} --list-formats-ext 确认，'
+                         f'要的是带 Video Capture + YUYV/MJPG 的那一组')
+            return False
+        self.error = ''                     # 起来了（原来是坏的也要清掉，状态行别一直挂着）
+
+        if self.cam_rot % 4:
+            print(f'[相机] {self.role} {CAM_ROT_CN[self.cam_rot % 4]}，'
+                  f'画面已转正，实际用 {first.shape[1]}x{first.shape[0]}'
+                  f'（跟上面打印的传感器尺寸宽高是反的，正常）')
 
         detector = cv2.QRCodeDetector() if self.role == 'tag' else None
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -445,12 +805,23 @@ class CameraWorker(threading.Thread):
             # 半径按实际帧的短边算，所以拿预热那帧的尺寸（不是循环里的 frame，那时候还没有）
             self.hp = eff_hough(self.hp_in, first.shape[0], first.shape[1])
 
-        n, t0, proc_ms = 0, time.time(), 0.0
+        n, t0, proc_ms, bad = 0, time.time(), 0.0, 0
         while self._running:
             ret, frame = cap.read()
             if not ret or frame is None:
+                bad += 1
+                if bad >= CAM_READ_FAIL_MAX:
+                    # 拔了 / 被别的程序抢了 / 这个节点本来就不出帧。别在这儿空转，
+                    # 交回 _run 去重开重解析 —— 重插上就自己回来了
+                    dev, self.dev = self.dev, ''
+                    cap.release()
+                    self._report(f'{dev} 连着 {CAM_READ_FAIL_MAX} 帧读不到（拔了？被别的程序抢了？）')
+                    return False
                 time.sleep(0.01)
                 continue
+            bad = 0
+            if self.cam_rot % 4:
+                frame = rot_frame(self.cam_rot, frame)   # 转正了才存/才识别
             t = time.time()
             if self.role == 'tag':
                 text = detect_qrcode(frame, detector, clahe)
@@ -473,6 +844,7 @@ class CameraWorker(threading.Thread):
                 n, t0 = 0, time.time()
 
         cap.release()
+        return True
 
 
 # ==================== 帧 ====================
@@ -493,10 +865,198 @@ def build_tag_frame(data):
 
 
 def build_cmd_frame(cmd):
-    """0x21 指令帧：固定 5 字节 AA 55 21 01 CC。"""
-    if cmd not in (CMD_IDLE, CMD_QR_DONE, CMD_GRAB):
-        raise ValueError(f'指令字 0x{cmd:02X} 不在协议里（只有 00/01/02 合法）')
+    """0x21 指令帧：固定 5 字节 AA 55 21 01 CC。
+    微调(30~33)也是走这条帧，只是第 5 个字节不同。"""
+    if cmd not in LEGAL_CMDS:
+        raise ValueError(f'指令字 0x{cmd:02X} 不在协议里'
+                         f'（只有 00/01/02 和微调 30/31/32/33 合法）')
     return FRAME_HEADER + bytes([TYPE_CMD, CMD_LEN, cmd])
+
+
+def rot_frame(rot, frame):
+    """按相机是怎么装着转的，把画面转回来（预览和识别都用转回来的画面）。
+
+    rot 是**相机转的方向**：相机逆时针转了 90°，画面里的东西就是顺时针躺着的，
+    所以要把画面逆时针转回去。转完画面宽高互换（640x480 -> 480x640）。
+    """
+    rot = int(rot) % 4
+    if rot == 1:
+        return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    if rot == 2:
+        return cv2.rotate(frame, cv2.ROTATE_180)
+    if rot == 3:
+        return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+    return frame
+
+
+def resolve_aim(aim_x, aim_y, height, width):
+    """对准点 = 想让物料出现在画面的哪里。默认画面正中；给了像素值就用给的。
+
+    注意 h/w 要传**转正之后**那一帧的尺寸（CAM_ROT 非 0 时宽高是互换的）。
+    """
+    return (width // 2 if aim_x < 0 else int(aim_x),
+            height // 2 if aim_y < 0 else int(aim_y))
+
+
+def align_cmd(ex, ey):
+    """按圆心离对准点的误差，给一条底盘微调指令。
+
+    ex = 圆心 x - 对准点 x（正 = 圆在画面右边），ey = 圆心 y - 对准点 y（正 = 圆偏下）。
+    一次只给一条：前后和左右同时发底盘会斜着走，而且哪条生效了看不出来，
+    所以先修误差大的那个轴（一样大就修左右）。
+    """
+    result = None
+    if abs(ex) >= abs(ey):
+        result = CMD_ADJUST_RIGHT if ex > 0 else CMD_ADJUST_LEFT
+        if(result == CMD_ADJUST_LEFT):
+            print("[微调] ex<=0，按协议优先修左右，发 CMD_ADJUST_LEFT")
+        elif(result == CMD_ADJUST_RIGHT):
+            print("[微调] ex>0，按协议优先修左右，发 CMD_ADJUST_RIGHT")
+        return result
+    result = CMD_ADJUST_BACK if ey > 0 else CMD_ADJUST_FWD
+    if(result == CMD_ADJUST_FWD):
+        print("[微调] ey<=0，按协议修前后，发 CMD_ADJUST_FWD")
+    elif(result == CMD_ADJUST_BACK):
+        print("[微调] ey>0，按协议修前后，发 CMD_ADJUST_BACK")
+    return result
+
+
+def align_cmd_for(ex, ey, tol_x, tol_y):
+    """按**两个轴各自的容差**决定这一步该修哪边；都在容差里返回 None。
+
+    不能光按"误差大的轴"挑（align_cmd 的挑法）：左右容差放宽到 60、前后还是 20 时，
+    ex=50 在容差里、ey=30 已经超了 —— 照"误差大"会去挪左右，白挪一步。
+    所以先看谁超了自己的容差：只超一个就修那个，两个都超才比大小。
+    """
+    out_x, out_y = abs(ex) > tol_x, abs(ey) > tol_y
+    if out_x and out_y:
+        return align_cmd(ex, ey)              # 都超：照旧修误差大的那个
+    if out_x:
+        return CMD_ADJUST_RIGHT if ex > 0 else CMD_ADJUST_LEFT
+    if out_y:
+        return CMD_ADJUST_BACK if ey > 0 else CMD_ADJUST_FWD
+    return None
+
+
+
+def nudge_step_note(before, after, cmd, tol_x, tol_y):
+    """微调走完一步后，量一下"3cm 在画面里是多少像素"，并判断容差够不够。
+
+    before / after = 挪之前、挪之后的圆心误差 (ex, ey)。任一为 None 就没得比，
+    返回 None（这帧没看到圆是正常的，不算错）。
+    cmd = 那一步实际发出去的方向（0x30~0x33）—— 用它定"量哪个轴、拿哪个容差"，
+    比照着误差大小猜靠谱（两个轴的容差不一样，猜错了会指错该改哪个常量）。
+
+    为什么要量它：底盘一步是**下位机固定的 3 cm**，上位机没地方传距离，所以误差只能
+    一步一步逼近。一步在画面里跨 S 个像素，容差 T 只要 < S/2，就会"差一点没进容差 →
+    挪一步 → 冲过头到另一边 → 再挪回来"，永远在容差两侧来回 —— 车上看着就是"小车来回动"。
+    收敛的必要条件就是 **T ≥ S/2**，S 只能实测。
+
+    另一半步（≈1.5 cm）就是这套机械的**精度上限**：3 cm 的步长下，最后一发落地时
+    残差最理想也就是半步。要更准只能让电控把步长改小，上位机这边调不出来。
+    """
+    if before is None or after is None:
+        return None
+    ax = 0 if cmd in (CMD_ADJUST_LEFT, CMD_ADJUST_RIGHT) else 1
+    tol = tol_x if ax == 0 else tol_y
+    b, a = before[ax], after[ax]
+    step = abs(b - a)
+    msg = f'[微调] 走完一步: {"xy"[ax]} 方向差 {b:+.0f} → {a:+.0f}px（3cm ≈ {step:.0f}px）'
+    if step < 1:
+        return msg + '；画面里没动 —— 查轮子打滑/堵转（协议 §七）'
+    if step > 2 * tol:
+        msg += (f'；**一步比容差的 2 倍还大**，必然在两侧来回 —— '
+                f'把 {"AIM_TOL_X" if ax == 0 else "AIM_TOL_Y"} 提到 '
+                f'{step / 2:.0f} 以上（半步 = 精度上限）')
+    elif abs(a) > tol:
+        msg += '；还没进容差，继续挪'
+    return msg
+
+
+class NudgePacer:
+    """微调的节拍器：一次一按，节拍由下位机的 0x01 给（**不是定时器**）。
+
+    见 USART1_Nudge_Protocol.md §四/§五：发出 `0x30`~`0x33` 之后，下位机把周期上报
+    切成 `0x10`（运动中），走完约 0.3 s 自己切回 `0x01`。所以**看到 `0x01` = 上一发
+    走完了**；那期间（`0x10` 里）发出去的微调会被静默丢弃 —— 不计错、不缓存。
+    "发完 sleep 0.5 s 再发下一发"的开环写法会少走几厘米，而且没有任何报错。
+
+    用法（主循环每帧喂状态、发出去时报一声）：
+
+        ev = pacer.note(state, now)     # 'station' / 'done' / 'stuck' / None
+        ok, why = pacer.ready(now)      # 想发之前问一句
+        ...真的发出去之后...
+        pacer.sent(now, real=True)      # real=False（离线干跑）不用等回执
+
+    `real=False` 时没有回执可等，就退回按 `interval` 定时 —— 桌面上干跑的行为
+    和以前的定时器版一样，不然一发之后就永远等不到状态变化了。
+    """
+
+    def __init__(self, interval=ALIGN_INTERVAL, timeout=ALIGN_RETURN_TIMEOUT,
+                 gap=ALIGN_NEW_STOP_GAP):
+        self.interval = interval
+        self.timeout = timeout
+        self.gap = gap
+        self.count = 0           # 这一站发了几条（--align-max 卡它）
+        self.pending = False     # 发出去的那一发还没等到它回到 0x01
+        self.saw_moving = False  # pending 期间看见过 0x10 了吗（协议里的"收到没"证据）
+        self.stuck = False       # 等超时都没回到 0x01 → 这一站不再挪车
+        self.at = 0.0            # 发上一发的时刻（兜底间隔和超时都从它算）
+        self.left_at = None      # 最近一次离开 0x01 的时刻（判断是不是新的一站）
+        self.last_state = None
+
+    def new_stop(self):
+        """车跑到新的一站：微调次数从头算、重新开门。"""
+        self.count = 0
+        self.stuck = False
+
+    def note(self, state, now):
+        """每帧喂一次当前 0x20 状态，返回这一刻发生的事（都没有就是 None）：
+
+        'done'    上一发微调走完了（0x01 回来了）——这是"它收到了"的直接证据
+        'stuck'   发出去了但一直没动，超时了
+        'station' 车自己跑过来停下的（不是我们挪的），微调次数清零
+        """
+        ev = None
+        if self.pending:
+            if state == STATE_MOVING:
+                self.saw_moving = True
+            elif state == STATE_WAIT_GRAB:
+                if self.saw_moving:
+                    self.pending = False        # 0x01 回来了 = 走完了，可以发下一发
+                    self.saw_moving = False
+                    ev = 'done'
+                elif now - self.at > self.timeout:
+                    self.pending = False        # 它压根没动过 → 这一发没生效
+                    self.stuck = True
+                    ev = 'stuck'
+        if (state == STATE_WAIT_GRAB and self.last_state is not None
+                and self.last_state != STATE_WAIT_GRAB
+                and (self.left_at is None or now - self.left_at > self.gap)):
+            ev = 'station'                      # 离开得够久，是自己跑过来的
+            self.new_stop()
+        if self.last_state == STATE_WAIT_GRAB and state != STATE_WAIT_GRAB:
+            self.left_at = now                  # 只在"离开"那一刻记时，回来才算时长
+        self.last_state = state
+        return ev
+
+    def sent(self, now, real=True):
+        """刚发出去一条微调。real=False（离线干跑）时没有回执可等。"""
+        self.count += 1
+        self.at = now
+        self.pending = bool(real)
+        self.saw_moving = False
+
+    def ready(self, now):
+        """现在能不能发下一发微调？返回 (能不能, 不能的原因)。"""
+        if self.stuck:
+            return False, (f'上一发微调发出去 {self.timeout:.0f}s 没等到下位机回到 0x01，'
+                           f'这一站不再挪车了（对着 USART1_Nudge_Protocol.md §七 查）')
+        if self.pending:
+            return False, None        # 正在走，正常等待，不用刷屏
+        if now - self.at < self.interval:
+            return False, None        # 兜底的最小间隔
+        return True, None
 
 
 # ==================== 颜色 / 物料 ====================
@@ -516,23 +1076,28 @@ def color_masks(hsv):
 
 
 # ---- 圆：物料的判据 ----
-Circle = namedtuple('Circle', 'color hsv area center radius fill')
+# defaults=(0,) 是给 merged 的：老的 6 个参数的写法（check_circle.py 那种）照样能用
+Circle = namedtuple('Circle', 'color hsv area center radius fill merged', defaults=(0,))
+# merged=这块物料上并掉了几个同心圆（圆台的另一层）。0 = 就检出一个圆。
+#        只是信息 —— 判定、对准、停稳全都不看它，看的是这个圆本身（合并后留的是大的那个）
 # color=圆内占比最高的颜色（认不出就是 None，不影响判定）
-# hsv=(H,S,V) 圈内像素的代表值，调阈值就看这个（认不出颜色时是整个盘的代表值）
+# hsv=(H,S,V) **整个圆内的平均**（0.85r 的盘，避开边缘过渡色），跟阈值表无关，
+#             就是给你照着调 HSV_RANGES 用的
 # area=πr²(px²)  center=(x,y)  radius=px  fill=那种颜色占取样盘的比例（只是信息）
 
 
 def _hsv_of(hsv, mask):
-    """mask 内像素的代表 HSV。S/V 取中位数；H 取圆均值 —— 红色跨 0/180 两头，
-    直接取中位数会算出个青绿来（0 和 179 的中位数是 90）。"""
+    """mask 内像素的**平均** HSV，用来照着调阈值。
+
+    H 用圆均值：红色跨 0/180 两头，直接取算术平均会算出个青绿来（0 和 179 平均是 90）。
+    """
     sel = mask > 0
-    n = int(cv2.countNonZero(mask))
-    if n == 0:
+    if not np.any(sel):
         return None
     ang = np.radians(hsv[:, :, 0][sel].astype(np.float64))
     h = int(round(np.degrees(np.arctan2(np.sin(ang).mean(),
                                         np.cos(ang).mean())))) % 180
-    return (h, int(np.median(hsv[:, :, 1][sel])), int(np.median(hsv[:, :, 2][sel])))
+    return (h, int(round(hsv[:, :, 1][sel].mean())), int(round(hsv[:, :, 2][sel].mean())))
 
 
 def default_hp(method=HOUGH_METHOD):
@@ -603,20 +1168,57 @@ def detect_materials(frame, hsv, hp):
         disk = np.zeros(gray.shape, dtype=np.uint8)
         cv2.circle(disk, (cx, cy), max(2, int(r * _DISK_SCALE)), 255, -1)
         disk_area = float(cv2.countNonZero(disk))
-        best_c, best_n, best_m = None, 0, None
+        best_c, best_n = None, 0
         for c in COLOR_ORDER:
-            m = cv2.bitwise_and(masks[c], disk)
-            n = cv2.countNonZero(m)
+            n = cv2.countNonZero(cv2.bitwise_and(masks[c], disk))
             if n > best_n:
-                best_c, best_n, best_m = c, n, m
+                best_c, best_n = c, n
         fill = best_n / disk_area if disk_area > 0 else 0.0
-        # HSV 取"判成那个颜色的那些像素"的代表值 —— 调阈值时对着看的就该是这群像素；
-        # 一个颜色都没判出来（比如黑物料）就退回整个盘，也有个参考
-        mats_hsv = _hsv_of(hsv, best_m) if best_c else _hsv_of(hsv, disk)
+        # HSV 报**整个圆内**的平均，跟颜色阈值表无关。别改成"取匹配上的那些像素"：
+        # 那样等于拿阈值筛完再告诉你阈值筛出来的东西，范围不对时你只会看到漏进去的
+        # 那一两个像素的 HSV（实测遇过：圆里 1% 匹配上绿色，就报那 1% 的 HSV）。
+        mats_hsv = _hsv_of(hsv, disk)
         materials.append(Circle(best_c, mats_hsv, float(np.pi * r * r), (cx, cy), r, fill))
 
-    materials.sort(key=lambda k: -k.area)
-    return materials
+    # 排序和圆台合并都在 merge_cones 里（它自己排，不靠这里），返回的还是从大到小
+    return merge_cones(materials)
+
+
+def merge_cones(materials):
+    """把同一块圆台的大小两个圆合成一块物料，留大的那个（见 CONE_MERGE_FRAC）。
+
+    按面积从大到小过一遍：小的圆心要是落在已经收下的那个大圆的盘里，就并进它，
+    并把大圆的 merged 加一（打印用，让人看得出确实检出了两层）。
+    返回的列表还是从大到小排的 —— materials[0] 就是"最大的那个圆"。
+
+    这里**自己先排一遍**，不靠调用方排：判据是"小的落在大的盘里"，先收下谁就决定了
+    留下谁 —— 倒着喂进来就会留下小的那个（小的盘小，34px 的圆心差照样算"落在盘里"）。
+    """
+    materials = sorted(materials, key=lambda k: -k.area)
+    kept = []
+    for m in materials:
+        for i, k in enumerate(kept):
+            dist = max(abs(m.center[0] - k.center[0]), abs(m.center[1] - k.center[1]))
+            if dist <= k.radius * CONE_MERGE_FRAC:
+                kept[i] = k._replace(merged=k.merged + 1)
+                break
+        else:
+            kept.append(m)
+    return kept
+
+
+def pick_target(materials, skip_colors=()):
+    """从检出的一堆圆里挑出这一帧要抓的那块：**最大的、颜色没被抓过**的那个。
+
+    materials 是从大到小排好的（merge_cones 排过），取第一个合格的就是。
+    全都在黑名单里（= 剩下的都是物料底下压着的那几个同色定位圆）就**退回最大的那个**：
+    还算"看到圆"（停稳、对准照走，车不会因为滤掉一个圆就往前面拱），
+    decide() 看到颜色在黑名单里会压住不发抓取。没有圆就返回 None。
+    """
+    for c in materials:
+        if c.color not in skip_colors:
+            return c
+    return materials[0] if materials else None
 
 
 # ==================== 串口 + 握手 ====================
@@ -638,6 +1240,7 @@ class McuLink:
         self.state_time = 0.0
         self.rx_count = {}           # 各类型收到多少帧
         self._unknown = set()        # 类型表里没有的帧，同一种只提醒一次
+        self._no_port_warned = False # "串口没连上，只打印"这一句也只提醒一次
         self._running = True
         self._thread = threading.Thread(target=self._loop, daemon=True)
 
@@ -659,6 +1262,7 @@ class McuLink:
                 port=self.port, baudrate=self.baudrate, bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_ONE, timeout=0.1)
             print(f'[串口] 打开 {self.port} @ {self.baudrate}')
+            self._no_port_warned = False
             return True
         except (serial.SerialException, OSError) as e:
             print(f'[串口] 打不开 {self.port}（{e}），5 秒后重试；这段时间只打印不发')
@@ -724,9 +1328,16 @@ class McuLink:
             print(f'[串口] 收到 0x{mtype:02X} ({len(payload)}B): {payload.hex(" ").upper()}')
 
     def send(self, frame, what, times=1):
-        """发一帧。指令(times=1)只发一次 —— 连发 = 连抓好几次。"""
+        """发一帧。指令(times=1)只发一次 —— 连发 = 连抓好几次。
+
+        串口没连上就返回 False，由调用方决定怎么打印（默认就是"只打印"）。
+        这里只提醒一次：tag 是 burst 5 次，每条都提醒就刷屏了。
+        """
         if self.ser is None:
-            print(f'[发送] {what}: 串口没连上，没发出去')
+            if not self._no_port_warned:
+                self._no_port_warned = True
+                for _ in range(5):
+                    print(f'[串口] {self.port} 没连上，往后只打印不发（接上会自动重连）')
             return False
         with self.lock:
             try:
@@ -764,10 +1375,12 @@ def main():
     ap.add_argument('--tag-fps', type=float, default=15.0, help='tag 相机帧率')
     ap.add_argument('--fourcc', default=CAMERA_FOURCC,
                     help="像素格式，默认 MJPG；'' 表示不改")
+    # help 里的百分号要写成 %%：argparse 对 help 还会再做一次 % 格式化，
+    # 单个 % 会让 --help 直接崩掉（ValueError: unsupported format character）
     ap.add_argument('--min-radius', type=int, default=0,
-                    help='圆最小半径 px；0=auto（帧短边的 %.0f%%）' % (CIRCLE_R_MIN_FRAC * 100))
+                    help=f'圆最小半径 px；0=auto（帧短边的 {CIRCLE_R_MIN_FRAC * 100:.0f}%%）')
     ap.add_argument('--max-radius', type=int, default=0,
-                    help='圆最大半径 px；0=auto（帧短边的 %.0f%%）' % (CIRCLE_R_MAX_FRAC * 100))
+                    help=f'圆最大半径 px；0=auto（帧短边的 {CIRCLE_R_MAX_FRAC * 100:.0f}%%）')
     ap.add_argument('--hough-method', choices=['alt', 'gradient'], default=HOUGH_METHOD,
                     help='alt(默认,完美度阈值,不出假圆) / gradient(经典,能认被遮挡的圆)')
     ap.add_argument('--hough-param1', type=float, default=0, help='Canny 阈值；0=auto')
@@ -779,83 +1392,172 @@ def main():
     ap.add_argument('--port', default=PORT, help='串口设备')
     ap.add_argument('--hb-hz', type=float, default=5.0,
                     help='运动中(0x10)发空指令当心跳的频率，0=不发')
+    ap.add_argument('--cam-rot', type=int, default=CAM_ROT, choices=[0, 1, 2, 3],
+                    help='物料相机是怎么转着装的：0=正装 1=逆时针90°(默认,车上现在这样) '
+                         '2=180° 3=顺时针90°（画面会转正，见模块里的 CAM_ROT）')
+    ap.add_argument('--tag-cam-rot', type=int, default=TAG_CAM_ROT, choices=[0, 1, 2, 3],
+                    help='tag 相机同上的朝向，默认 0=正装')
+    ap.add_argument('--aim-x', type=int, default=AIM_X,
+                    help='对准点 x 像素；-1(默认)=画面正中')
+    ap.add_argument('--aim-y', type=int, default=AIM_Y,
+                    help=f'对准点 y 像素；-1=画面正中。想让准星往下移就往大改'
+                         f'（默认 {AIM_Y} = 正中再往下一点；预览里画着准星）')
+    ap.add_argument('--aim-tol-x', type=float, default=AIM_TOL_X,
+                    help=f'**左右**的容差（默认 {AIM_TOL_X:.0f}px）：圆心横向离对准点多少'
+                         f'像素以内算对准，超了就发左/右微调')
+    ap.add_argument('--aim-tol-y', type=float, default=AIM_TOL_Y,
+                    help=f'**前后**的容差（默认 {AIM_TOL_Y:.0f}px）：圆心纵向离对准点多少'
+                         f'像素以内算对准，超了就发前/后微调。'
+                         f'两个轴各管各的；都**必须 ≥ 半步**，否则那个方向一定来回动 —— '
+                         f'S 看日志里"走完一步…（3cm ≈ Npx）"那行的 N，填 N/2 再多一点')
+    ap.add_argument('--align-enable', action=argparse.BooleanOptionalAction,
+                    default=ALIGN_ENABLE,
+                    help=f'底盘微调总开关（默认 {"开" if ALIGN_ENABLE else "关"}）。'
+                         f'关着的时候只报"还差多少像素、该往哪边挪"，一条微调都不发')
+    ap.add_argument('--align-interval', type=float, default=ALIGN_INTERVAL,
+                    help='两条底盘微调指令**至少**隔几秒（默认 0.6）。'
+                         '这不是节拍：线上节拍是下位机给的（发完等它回到 0x01，'
+                         '见 --align-return-timeout）；它只是兜底的最小间隔，'
+                         '离线干跑时才是唯一节拍')
+    ap.add_argument('--align-return-timeout', type=float, default=ALIGN_RETURN_TIMEOUT,
+                    help='发完一发微调后最多等几秒让它回到 0x01（默认 3.0）。'
+                         '协议里一发往返 0.4~0.5s；超时 = 这发没生效，'
+                         '这一站就不再挪车（不然会一直空等）')
+    ap.add_argument('--align-max', type=int, default=ALIGN_MAX,
+                    help=f'一次停稳里最多发几条微调（默认 {ALIGN_MAX}）。用满了就**不再挪车、'
+                         f'照抓**（抓偏一点也比整轮卡着不抓好），原因会打出来；'
+                         f'0=不限（不建议：认成假圆时会一路挪出去）')
+    ap.add_argument('--search-interval', type=float, default=SEARCH_INTERVAL,
+                    help=f'等待抓取时连续这么久没看到圆就往前找一次'
+                         f'（默认 {SEARCH_INTERVAL:.0f}s，一次还是 3cm）')
+    ap.add_argument('--search-max', type=int, default=SEARCH_MAX,
+                    help=f'一次停稳里最多往前找几次（默认 {SEARCH_MAX}，0=不限）。'
+                         f'找满还是没圆就不动了；这几发也算进 --align-max 的总预算')
+    ap.add_argument('--color-policy', dest='color_policy', choices=('once', 'repeat'),
+                    default=COLOR_POLICY,
+                    help=f'同一个颜色能不能重复抓（默认 {COLOR_POLICY}）。'
+                         f'once = 一个颜色抓过一次就不再抓：物料底下压着同色的定位圆，'
+                         f'物料抓走了它还在，再抓就是空抓；'
+                         f'repeat = 同色的圆照抓（老行为，同一站又来个同色物料时用）。'
+                         f'车跑到新的一站自动清空')
+    # 老写法保留：命令行里已经写过 --color-blacklist / --no-color-blacklist 的不用改
+    ap.add_argument('--color-blacklist', dest='color_policy', action='store_const',
+                    const='once', default=COLOR_POLICY,
+                    help='老写法，等于 --color-policy once')
+    ap.add_argument('--no-color-blacklist', dest='color_policy', action='store_const',
+                    const='repeat', default=COLOR_POLICY,
+                    help='老写法，等于 --color-policy repeat')
     ap.add_argument('--still-time', type=float, default=STILL_TIME,
-                    help='"等待颜色信息"时，圆要连续静止这么多秒才发抓取（默认 0.5）')
+                    help='"等待抓取指令"时，圆要连续静止这么多秒才准动（默认 0.5）；'
+                         '0=一看到圆就动（微调和对准都跟着这个门槛走）')
     ap.add_argument('--still-tol', type=float, default=STILL_TOL,
                     help='圆心挪动超过这么多像素就算还在动（默认 6）')
     ap.add_argument('--grab-cooldown', type=float, default=GRAB_COOLDOWN,
                     help='两次"抓取一次"之间至少隔几秒')
-    ap.add_argument('--send', action='store_true', help='真的发给下位机（默认只打印）')
+    ap.add_argument('--dry-run', action='store_true',
+                    help='只打印不发给下位机。默认是**真发**；串口没连上时自动只打印')
     ap.add_argument('--rx-log', action='store_true', help='打印下位机发来的每一帧')
     ap.add_argument('--no-preview', action='store_true', help='不开预览窗口')
-    # 画面亮暗是摄像头自己的自动曝光/增益定的，脚本只是把它设下来。
-    # 不填就一点都不碰（保持摄像头原来的设置），填了会读回来核对并打印。
-    ap.add_argument('--brightness', type=float, default=None,
-                    help='亮度；不填=不碰。范围因摄像头而异，用 v4l2-ctl --list-ctrls 看')
-    ap.add_argument('--gain', type=float, default=None, help='增益；不填=不碰')
-    ap.add_argument('--exposure', type=float, default=None,
-                    help='曝光（绝对）；不填=不碰。要先把 --auto-exposure manual 关掉才设得进去')
-    ap.add_argument('--auto-exposure', choices=['auto', 'manual'], default=None,
-                    help='自动曝光开关；画面太亮就 manual（不填=不碰）')
+    # 物料相机(M2)的曝光：默认按文件顶上 MAT_* 那几个常量来（默认钉 hue=0 + 压一点亮度）。
+    # 这几个开关**只作用在物料那一路**，tag 相机不动（它自己认得挺好）。
+    # 想临时压一格就 --brightness -20，不用改文件。
+    ap.add_argument('--hue', type=float, default=MAT_HUE,
+                    help=f'物料相机色相，-2000~2000（默认 {MAT_HUE}）。钉住是为了 PC 和车上'
+                         f'看到同一个颜色；文件顶上 MAT_HUE 填 None 就是不碰')
+    ap.add_argument('--brightness', type=float, default=MAT_BRIGHTNESS,
+                    help=f'物料相机亮度，范围 -64~64（默认 {MAT_BRIGHTNESS}，1 格 ≈ 1 个 V 亮度）。'
+                         f'**这颗模组上唯一真管用的曝光旋钮**')
+    ap.add_argument('--gain', type=float, default=MAT_GAIN,
+                    help='物料相机增益；这颗模组没有 gain 控制，填了会打"没设上"')
+    ap.add_argument('--exposure', type=float, default=MAT_EXPOSURE,
+                    help='物料相机曝光（绝对）；**这颗模组上是死的**，填了没用')
+    ap.add_argument('--auto-exposure', choices=['auto', 'manual'], default=MAT_AUTO_EXPOSURE,
+                    help=f'物料相机自动曝光（默认 {MAT_AUTO_EXPOSURE}）。'
+                         f'注：这颗模组上 auto/manual 一个样，改它没用，改 --brightness')
     args = ap.parse_args()
 
     if args.list:
         list_cameras()
         return 0
 
+    # --color-policy 落成一个布尔：「滤掉抓过的颜色」还是「照抓」。后面三处
+    # （选目标 pick_target、decide 里压住 0x02、真发出去之后记黑名单）都看它，
+    # 别再各比一次字符串。布尔在这块儿先算出来，是因为开机的提示就要用它
+    skip_grabbed = (args.color_policy == 'once')
+
     # ---- 开两路相机，哪路挂了另一路照跑 ----
     workers = []
-    for role, spec, w, h, fps in (('material', args.dev, args.width, args.height, args.fps),
-                                  ('tag', args.tag_dev, args.tag_width,
-                                   args.tag_height, args.tag_fps)):
+    for role, spec, w, h, fps, rot in (
+            ('material', args.dev, args.width, args.height, args.fps, args.cam_rot),
+            ('tag', args.tag_dev, args.tag_width, args.tag_height, args.tag_fps,
+             args.tag_cam_rot)):
         if not spec:
             print(f'[相机] {role} 这一路没给设备，不开')
             continue
-        dev = resolve_device(spec, args.video_index, args.by)
-        if not dev:
-            print(f'[相机] {role} 相机没找到，这一路不开（用 --list 看现状）')
-            continue
+        # 设备只在线程里解析（这里不解析）：线程第一轮把诊断全打出来，之后每
+        # CAM_RETRY_INTERVAL 秒重新解析 + 重开一次（插晚了、换 USB 口、节点号变了
+        # 都能自己接上），重试时只打一行提醒。在这里也解析一遍的话，开机那堆
+        # "分不清是哪块板卡"会原样打两遍。
         hp = {'method': args.hough_method, 'param1': args.hough_param1,
               'param2': args.hough_param2, 'min_dist': args.circle_mindist,
               'min_radius': args.min_radius, 'max_radius': args.max_radius}
-        ctrls = {k: v for k, v in (('brightness', args.brightness), ('gain', args.gain),
-                                   ('exposure', args.exposure),
-                                   ('auto_exposure', args.auto_exposure)) if v is not None}
-        workers.append(CameraWorker(role, dev, w, h, fps, args.fourcc, hp=hp, ctrls=ctrls))
+        # 曝光只往物料(M2)那一路打；tag 相机一个控制都不碰（见顶部"物料相机(M2)的曝光"）
+        ctrls = ({k: v for k, v in (('hue', args.hue), ('brightness', args.brightness),
+                                    ('gain', args.gain), ('exposure', args.exposure),
+                                    ('auto_exposure', args.auto_exposure)) if v is not None}
+                 if role == 'material' else {})
+        workers.append(CameraWorker(role, '', w, h, fps, args.fourcc, hp=hp, ctrls=ctrls,
+                                    cam_rot=rot, spec=spec,
+                                    video_index=args.video_index, by=args.by))
     if not workers:
-        print('[相机] 一路相机都没开起来，退出')
+        print('[相机] 两路都没给设备（--dev / --tag-dev），没有相机可开，退出')
         return 1
 
     for wk in workers:
         wk.start()
     time.sleep(0.5)          # 等它们把"打不开/读不到帧"报出来
-    for wk in workers:
-        if wk.error:
-            print(f'[相机] {wk.role} 相机有问题: {wk.error}')
-    alive = [wk for wk in workers if not wk.error]
-    if not alive:
-        print('[相机] 两路都没出帧，退出')
-        return 1
-    tag_wk = next((wk for wk in alive if wk.role == 'tag'), None)
-    mat_wk = next((wk for wk in alive if wk.role == 'material'), None)
+    # 两路都没起来也**不退出**：线程每 CAM_RETRY_INTERVAL 秒重试一轮，插上就自己接上
+    # （串口没连上也是这么办的）。起不来的那一路线程自己会打显著提醒，这里就不再重复一遍。
+    tag_wk = next((wk for wk in workers if wk.role == 'tag'), None)
+    mat_wk = next((wk for wk in workers if wk.role == 'material'), None)
 
-    if mat_wk:
+    if mat_wk and mat_wk.up():
         _m, hp = mat_wk.material_detail()
         print(f'[物料] 判据：Hough 找圆，检出圆的就算物料。方法 {hp.get("method")}'
               f'（dp={hp.get("dp")} param1={hp.get("param1")} param2={hp.get("param2")}），'
               f'半径 {hp.get("min_radius")}~{hp.get("max_radius")}px，'
               f'圆心间距≥{hp.get("min_dist")}px')
         print('[物料] 颜色只是附带信息（圆内占比最高的那种），认不出颜色不影响判定')
+        print('[物料] 每行的 HSV 是**整个圆内的平均**，跟 HSV_RANGES 那张表无关 —— '
+              '照着它调表里的范围就行')
     else:
-        print('[物料] 没有可用物料相机，"抓取一次"那一路不会触发')
-    if tag_wk:
+        print('[物料] 物料相机现在没起来，"抓取一次"那一路不会触发（起来了会自己接上）')
+    if tag_wk and tag_wk.up():
         print(f'[Tag] tag 不看状态，识别到就发（burst {TAG_SEND_TIMES} 次）')
     else:
-        print('[Tag] 没有可用 tag 相机，二维码那一路不会触发')
+        print('[Tag] tag 相机现在没起来，二维码那一路不会触发（起来了会自己接上）')
     print('[握手] 0x20 状态 -> 0x21 指令: 等待二维码(00) 发 01; '
-          '等待颜色信息(01) 且圆停稳发 02; 运动中(10) 不发'
+          '等待抓取指令(01) 且圆停稳 -> 没对准发微调(30/31/32/33)、对准了发 02; '
+          '运动中(10) 不发'
           + (f'(心跳 {args.hb_hz:.0f}Hz)' if args.hb_hz > 0 else ''))
-    print(f'[发送] {"真发" if args.send else "只打印（加 --send 才真发）"}')
+    # 转正后的画面宽高：CAM_ROT 不是 0 时和设的宽高是反的。这里只是启动时打个预告，
+    # 真正用的对准点每帧按**实际帧**的尺寸算（相机不一定按你要的分辨率给）
+    fh, fw = (args.width, args.height) if args.cam_rot % 4 else (args.height, args.width)
+    aim_show = resolve_aim(args.aim_x, args.aim_y, fh, fw)
+    print(f'[对准] 对准点 {aim_show}（{"画面正中" if args.aim_x < 0 and args.aim_y < 0 else "指定的"}），'
+          f'容差 左右 {args.aim_tol_x:.0f}px / 前后 {args.aim_tol_y:.0f}px，'
+          f'一次停稳最多挪 {args.align_max if args.align_max > 0 else "无限"} 步')
+    print(f'[对准] 微调节拍跟着下位机走：一发一发来，等它报回 0x01 才发下一发'
+          f'（等不到就 {args.align_return_timeout:.0f}s 超时停手）；'
+          f'另有 {args.align_interval:.1f}s 的最小间隔兜底')
+    print(f'[朝向] 物料相机 {CAM_ROT_CN[args.cam_rot % 4]}，'
+          f'tag 相机 {CAM_ROT_CN[args.tag_cam_rot % 4]}')
+    print(f'[发送] {"只打印（--dry-run）" if args.dry_run else "真发"}')
+    # 这条是这次抓取会怎么判的关键，开机就说清楚用的是哪一种（--color-policy）
+    print('[物料] 颜色重复抓：' + ('不许 —— 一个颜色抓过一次就不再抓（防底下那个同色定位圆的空抓），'
+                                   '车跑到新的一站清空'
+                                   if skip_grabbed else
+                                   '允许 —— 同色的圆照抓（--color-policy repeat）'))
 
     link = McuLink(args.port, BAUDRATE, verbose=args.rx_log)
     link.start()
@@ -874,8 +1576,23 @@ def main():
     last_grab = 0.0          # 上次发"抓取一次"的时刻
     still_ref = None         # 上次看到的那个圆 (center, radius)，用来判断动没动
     still_since = None       # 最后一次"看到圆在动"的时刻；None = 现在没圆
+    no_circle_since = None   # 最后一次"一个圆都没看到"是从什么时候开始的；看到圆就清掉。
+                             # 够 SEARCH_INTERVAL 就往前的找一发（见"找不到圆就往前找"）
+    search_count = 0         # 这一站已经往前找了几发；新的一站从头算
+    grabbed_colors = set()   # 已经真发过抓取的那些颜色。skip_grabbed 时里面的颜色不再抓 ——
+                             # 物料底下压着一个同色的圆，物料没了它还在，再抓就是空抓
+                             # （清空时机见 COLOR_POLICY）
+    target_color = None      # 这一帧挑中要抓的那个圆是什么颜色（aim/still 看的也是它）
+    aim = None               # 对准点 (x, y)，按这一帧的实际尺寸算；None = 还没出帧
+    aim_err = None           # 大圆圆心 - 对准点 = (ex, ey)；None = 没有圆
+    # 微调节拍器：发完一发要等它回到 0x01 才准发下一发（USART1_Nudge_Protocol.md §四）
+    pacer = NudgePacer(args.align_interval, args.align_return_timeout)
+    offline_align_warned = False   # "帧没真发出去、退回定时节拍"这句只提醒一次
+    align_sent_err = None    # 发那条微调时的误差 (ex, ey)，等它走完拿来回量"一步多少像素"
+    align_sent_cmd = None    # 那条微调的方向（0x30~0x33），用来定量的是哪个轴
     last_hb = 0.0            # 上次发心跳的时刻
-    dead_roles = set()       # 已经报过"中途挂了"的相机，别每 2s 刷一遍
+    last_cam_err = {}        # {role: 上次看到的 error}。相机开起来/掉下去只在**变的时候**
+                             # 说一句，别每 2s 刷一遍（线程自己每轮重试已经打显著提醒了）
     no_state_warned = False
     state_episode = 0
     frames = 0
@@ -889,14 +1606,74 @@ def main():
             if qr_done_episode == state_episode:
                 return None, None            # 这一轮已经发过 01 了，等下一次等待
             return CMD_QR_DONE, None
-        if state == STATE_WAIT_COLOR:
+        if state == STATE_WAIT_GRAB:
             if not materials:
-                return None, '等待颜色信息，但画面里没有物料'
+                # 车停偏了、物料压根没进画面：往前拱一小步找找（一次还是 3 cm，
+                # 走的是同一条 0x30~0x33 通道，所以节拍照样听 pacer 的，不能连发）。
+                # 往前找也是在挪车，所以和微调共用一个总开关：ALIGN_ENABLE=False
+                # （下位机那套还没烧上时）就一条都不发，也不往前找。
+                if not args.align_enable:
+                    return None, ('等待抓取指令，没看到圆；底盘微调关着'
+                                  '（ALIGN_ENABLE=False），不往前找')
+                if args.search_max > 0 and search_count >= args.search_max:
+                    return None, (f'等待抓取指令，往前找了 {search_count} 次还是没看到圆，'
+                                  f'不再往前了（--search-max）；不盲抓，就这么等着')
+                if no_circle_since is not None and now - no_circle_since >= args.search_interval:
+                    can, why = pacer.ready(now)
+                    if can:
+                        return CMD_ADJUST_FWD, None
+                    if why is not None:
+                        return None, why          # 上一发卡住了，别再往前拱
+                    return None, None             # 正在走 / 还没到最小间隔，等它
+                return None, (f'等待抓取指令，还没看到圆'
+                              f'（{args.search_interval:.0f}s 没圆就往前找，'
+                              f'已找 {search_count}/{args.search_max}）')
+            if aim is None or aim_err is None:
+                return None, None            # 还没出帧，对准点算不出来
+
+            def want_grab(reason):
+                """该发抓取了 —— 但这个颜色抓过就压住不发（--color-policy once）。
+
+                压住只是不发 0x02：上面的停稳、对准那几关**照走**（车还是会对准它），
+                所以拿到的不是"没物料"，不会去触发往前找。底下那个同色的圆就让它那么放着。
+                """
+                if skip_grabbed and target_color in grabbed_colors:
+                    return None, (f'{COLOR_CN.get(target_color, target_color)}色已经抓过一次了，'
+                                  f'画面里这个同色的圆是它底下压着的那个，不抓'
+                                  f'（--color-policy once；改成 repeat 就照抓）')
+                return CMD_GRAB, reason
+
             if now - last_grab < args.grab_cooldown:
                 return None, None
             if still_since is None or now - still_since < args.still_time:
-                return None, '等待颜色信息，圆还在动（等它停稳再抓）'
-            return CMD_GRAB, None
+                return None, '等待抓取指令，圆还在动（等它停稳再对准/抓）'
+            ex, ey = aim_err
+            # 左右和前后各有各的容差（--aim-tol-x / --aim-tol-y），
+            # 谁超了自己的容差就修谁；都在容差里才算对准。见 align_cmd_for。
+            want = align_cmd_for(ex, ey, args.aim_tol_x, args.aim_tol_y)
+            # 底盘微调关着（ALIGN_ENABLE=False）时，对准这一关整个跳过：
+            # 圆停稳了就直接抓，差多少像素只打在状态行里看看，不影响发什么。
+            if want is not None and args.align_enable:
+                # 停稳了但没对准：能挪就挪一发。微调是**动作**，一次只发一条，
+                # 而且**发完要等它回到 0x01 才准发下一发** —— 下位机挪的时候报 0x10，
+                # 那期间发的会被静默丢弃（USART1_Nudge_Protocol.md §四）。
+                # 节拍由 pacer 管，这里只问它一句"现在能发吗"。
+                #
+                # 挪不动了就**照抓**（微调发满 --align-max、或上一发卡住超时）：
+                # 抓偏一点也比整轮卡在这儿不抓好。原因照样打出来。
+                can, why = pacer.ready(now)          # why 有值 = 挪不了了
+                full = args.align_max > 0 and pacer.count >= args.align_max
+                if can and not full:
+                    return want, None                # want 已经按各自的容差挑好轴了
+                if why is not None:                  # 上一发卡住了（没等到 0x01）
+                    return want_grab(why + '；**照抓**')
+                if pacer.pending:
+                    return None, None                # 上一发还在走，等它落地（车在动，别抓）
+                if full:
+                    return want_grab(f'还差 ({ex:+.0f},{ey:+.0f})px，微调发满 '
+                                     f'{args.align_max} 条，不再挪了；**照抓**')
+                return None, None                    # 还没到最小间隔，等一下
+            return want_grab(None)
         if state == STATE_MOVING:
             if args.hb_hz > 0 and now - last_hb >= 1.0 / args.hb_hz:
                 return CMD_IDLE, None
@@ -910,27 +1687,38 @@ def main():
         tag_text = None
         if tag_wk:
             _f, tag_text, _m = tag_wk.snapshot()
-        if tag_text and tag_text != last_tag:
+        if tag_text:
             print(f'[Tag] 识别到: {tag_text}')
             qr_text = tag_text
             qr_done_episode = None           # 内容变了，允许再通知一次
+        
             try:
                 f = build_tag_frame(tag_text)
-                if args.send:
-                    link.send(f, 'tag 0x03', times=TAG_SEND_TIMES)
-                else:
-                    print(f'[Tag] 只打印不发: {f.hex(" ").upper()}'
-                          f'（burst {TAG_SEND_TIMES} 次）')
+                if args.dry_run:
+                    print(f'[Tag] 只打印不发（--dry-run）: {f.hex(" ").upper()}'
+                        f'（burst {TAG_SEND_TIMES} 次）')
+                elif not link.send(f, 'tag 0x03', times=TAG_SEND_TIMES):
+                    print(f'[Tag] 串口没连上，只打印: {f.hex(" ").upper()}'
+                        f'（burst {TAG_SEND_TIMES} 次）')
             except ValueError as e:
                 print(f'[Tag] {e}')
         last_tag = tag_text
 
         # ---- 物料：找圆 ----
         materials = []
+        mat_frame = None
+        aim = None
         if mat_wk:
-            _f, _t, materials = mat_wk.snapshot()
-        # 圆的数量/位置/颜色/HSV 变了才打印，不然每帧刷屏
-        sig = tuple((c.color, c.hsv, c.radius, c.center) for c in materials)
+            mat_frame, _t, materials = mat_wk.snapshot()
+            if mat_frame is not None:
+                # 对准点按**这一帧的实际尺寸**算：转了画面宽高是反的，
+                # 而且相机不一定按你要的分辨率给。识别的就是转正后的帧，对得上。
+                aim = resolve_aim(args.aim_x, args.aim_y,
+                                  mat_frame.shape[0], mat_frame.shape[1])
+        # 圆的数量/位置/颜色/HSV 变了才打印，不然每帧刷屏。
+        # 黑名单也进签名：抓过之后那几个圆还是老样子，但"压着不抓"得让人看见
+        sig = (tuple((c.color, c.hsv, c.radius, c.center) for c in materials),
+               tuple(sorted(grabbed_colors, key=str)))
 
         if sig != last_colors:
             if materials:
@@ -938,18 +1726,25 @@ def main():
                     ((f'{COLOR_CN[c.color]}({COLOR_CODE[c.color]}) {c.fill:.0%}'
                       if c.color else '颜色认不出')
                      + (f' HSV={c.hsv[0]},{c.hsv[1]},{c.hsv[2]}' if c.hsv else ' HSV=-')
-                     + f' r={c.radius} @{c.center}')
+                     + f' r={c.radius} @{c.center}'
+                     # 圆台会检出大小两层，合并成一块了；说一声省得以为漏了一个圆
+                     + (f'（圆台：并掉了 {c.merged} 个同心圆）' if c.merged else '')
+                     # 抓过的颜色：说明它为什么一直在画面里却不抓
+                     + ('（这个颜色抓过了，压着不抓）' if c.color in grabbed_colors else ''))
                     for c in materials)
-                print(f'[物料] 检出 {len(materials)} 个圆: {detail}')
+                print(f'[物料] 检出 {len(materials)} 块物料: {detail}')
             else:
                 print('[物料] 画面里没有圆')
         last_colors = sig
 
-        # ---- 圆停稳了没：物料停下才好抓，等它不动了再发 ----
-        # 只看最大的那个圆（materials 按面积排过序），它就是要抓的那块物料。
-        # still_since = 最后一次"看到它在动"的时刻；它离现在够久 = 停稳了。
+        # ---- 圆停稳了没 + 离对准点还差多少 ----
+        # 只看那一块要抓的圆（= 最大的、颜色没被抓过的那个，见 pick_target），
+        # 它就是要抓的那块物料。still_since = 最后一次"看到它在动"的时刻；
+        # 它离现在够久 = 停稳了。微调挪一步车之后画面会动一下 → 这里自动重新计时，
+        # 所以两条微调之间天然隔开一段（想挪快点就调小 --still-time）。
         if materials:
-            big = materials[0]
+            big = pick_target(materials, grabbed_colors if skip_grabbed else ())
+            target_color = big.color
             if still_ref is None:
                 still_since = now                      # 第一次看到，从现在开始计时
             else:
@@ -959,8 +1754,15 @@ def main():
                 if move > args.still_tol or dr > max(2, still_ref[1] * STILL_R_FRAC):
                     still_since = now                  # 动了，重新计时
             still_ref = (big.center, big.radius)
+            aim_err = ((big.center[0] - aim[0], big.center[1] - aim[1])
+                       if aim is not None else None)
+            no_circle_since = None                     # 看到圆了，"多久没圆"从零数
         else:
             still_ref, still_since = None, None        # 没圆就当没停稳，从零开始算
+            aim_err = None
+            target_color = None
+            if no_circle_since is None:
+                no_circle_since = now                  # 从"一个圆都没看到"开始计时
 
         # ---- 握手：按 0x20 的状态发 0x21 指令 ----
         state, fresh = link.fresh_state()
@@ -975,35 +1777,83 @@ def main():
             last_state = state
 
         if fresh:
+            # 微调节拍跟着状态走：'done' = 上一发走完了，'stuck' = 发出去没动静，
+            # 'station' = 车自己跑到新的一站（微调次数从头算）
+            ev = pacer.note(state, now)
+            if ev == 'station':
+                # 车自己跑到新的一站：往前找的次数从头算，"多久没圆"也重新数
+                # （不能拿上一站的时刻接着数，不然一到站就立刻往前拱）
+                search_count = 0
+                no_circle_since = None
+                # 上一站抓过的颜色重新可抓 —— 底下的定位圆跟着车走了，这一站是新的物料。
+                # 为什么要等这个事件、不等"回到 0x01"或者"报 0x00"，见 COLOR_POLICY
+                if grabbed_colors:
+                    print(f'[物料] 车跑到新的一站，颜色过滤清空（本来不抓：'
+                          f'{"、".join(COLOR_CN.get(c, str(c)) for c in sorted(grabbed_colors, key=str))}）')
+                    grabbed_colors.clear()
+            elif ev == 'stuck':
+                print(f'[微调] 上一发发出去 {args.align_return_timeout:.0f}s 没等到下位机'
+                      f'回到 0x01，这一站不再挪车了'
+                      f'（状态一直是 0x{state:02X}；对着 USART1_Nudge_Protocol.md §七 查）')
+            elif ev == 'done':
+                # 走完一步正好量一次"3cm 是多少像素"，顺便看容差够不够
+                _note = nudge_step_note(align_sent_err, aim_err, align_sent_cmd,
+                                        args.aim_tol_x, args.aim_tol_y)
+                if _note:
+                    print(_note)
+
             cmd, skip = decide(state, now)
             if cmd is not None:
                 try:
                     f = build_cmd_frame(cmd)
-                    if args.send:
-                        link.send(f, f'指令 0x21 {CMD_CN[cmd]}')
+                    shown = (f'状态 {STATE_CN.get(state, "?")} → '
+                             f'{f.hex(" ").upper()}（{CMD_CN[cmd]}）')
+                    # 这一帧到底写进串口了没有。微调的节拍要看它：
+                    # 真发出去了 → 等下位机把状态切到 0x10 再切回 0x01，才算这一发走完；
+                    # 没发出去（--dry-run / 串口没连上）→ 等不到任何回执，
+                    # 再等下去只会超时报"没生效"，所以那种情况退回按 ALIGN_INTERVAL 定时
+                    sent_real = False
+                    if args.dry_run:
+                        print(f'[握手] {shown}  [只打印，--dry-run]')
+                    elif link.send(f, f'指令 0x21 {CMD_CN[cmd]}'):
+                        sent_real = True
                     else:
-                        print(f'[握手] 状态 {STATE_CN.get(state, "?")} → 发指令 '
-                              f'{f.hex(" ").upper()}（{CMD_CN[cmd]}）  [只打印，没真发]')
+                        print(f'[握手] {shown}  [串口没连上，只打印]')
                     if cmd == CMD_QR_DONE:
                         qr_done_episode = state_episode
                     elif cmd == CMD_GRAB:
                         last_grab = now
-                        if MATERIAL_TAG:
-                            mt = build_tag_frame(MATERIAL_TAG_CONTENT)
-                            print(f'[物料] 顺带发 0x03 颜色内容: {mt.hex(" ").upper()}')
-                            if args.send:
-                                link.send(mt, '物料 0x03', times=TAG_SEND_TIMES)
+                        # 这个颜色抓过了，底下压着的那个同色的圆别再抓（--color-policy once）。
+                        # 不看 sent_real：跟 last_grab 一个口径 —— 干跑时状态机走的路
+                        # 要和线上一样，不然桌面上测出来的行为对不上车
+                        if skip_grabbed and target_color is not None \
+                                and target_color not in grabbed_colors:
+                            grabbed_colors.add(target_color)
+                            print(f'[物料] {COLOR_CN.get(target_color, target_color)}色记下了：'
+                                  f'同色的圆不再抓（车跑到新的一站时清空）')
                     elif cmd == CMD_IDLE:
                         last_hb = now
+                    elif cmd in ADJUST_CMDS:
+                        pacer.sent(now, real=sent_real)
+                        align_sent_err = aim_err     # 挪之前的误差，走完了好量一步多大
+                        align_sent_cmd = cmd         # 发的是哪个方向（定量的是哪个轴）
+                        no_circle_since = None       # 车要动了，画面会变，"多久没圆"重新数
+                        if not materials:
+                            search_count += 1        # 画面里没圆 → 这一发是"往前找"
+                        if not sent_real and not offline_align_warned:
+                            offline_align_warned = True
+                            print(f'[微调] 帧没真发出去，节拍退回按 {args.align_interval:.1f}s '
+                                  f'定时（线上真发时是等下位机回 0x01）')
                 except ValueError as e:
                     print(f'[握手] {e}')
             if skip != last_skip and skip is not None:
-                print(f'[握手] 先不发: {skip}')
+                # skip 有话说但 cmd 也是有的（照抓那种）：别写"先不发"，它已经发了
+                print(f'[握手] {skip}' if cmd is not None else f'[握手] 先不发: {skip}')
             last_skip = skip
 
-        # ---- 预览：每路一个窗口 ----
+        # ---- 预览：每路一个窗口（没出帧的那路跳过，窗口开出来就是空的没意义）----
         if show:
-            for wk in alive:
+            for wk in workers:
                 frame, t_text, mats = wk.snapshot()
                 if frame is None:
                     continue
@@ -1021,6 +1871,29 @@ def main():
                                     (max(0, c.center[0] - c.radius),
                                      max(12, c.center[1] - c.radius - 6)),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 2)
+                    # 对准点 + 这一刻要挪的方向。方向反了就是装反了，先看这里。
+                    if aim is not None:
+                        cv2.drawMarker(view, aim, (0, 255, 255), cv2.MARKER_CROSS, 26, 2)
+                        # 容差框：横竖两个容差不一样，圆圈表达不了，画成矩形
+                        # （半宽 = 左右容差，半高 = 前后容差）。圆心落进框里 = 对准了。
+                        cv2.rectangle(view,
+                                      (int(aim[0] - args.aim_tol_x), int(aim[1] - args.aim_tol_y)),
+                                      (int(aim[0] + args.aim_tol_x), int(aim[1] + args.aim_tol_y)),
+                                      (0, 255, 255), 1)
+                        if aim_err is not None:
+                            ex, ey = aim_err
+                            # 箭头从准星(对准点)指向物料圆心 = **车要往哪边挪**
+                            # （车往右挪，物料就在画面里往左滑向准星，方向跟箭头一致）
+                            cv2.arrowedLine(view, aim, (int(aim[0] + ex), int(aim[1] + ey)),
+                                            (0, 255, 255), 2, tipLength=0.12)
+                            want = align_cmd_for(ex, ey, args.aim_tol_x, args.aim_tol_y)
+                            if want is not None:
+                                txt = f'-> {ADJUST_EN[want]} ({ex:+.0f},{ey:+.0f})'
+                                tcol = (0, 255, 255)
+                            else:
+                                txt, tcol = 'AIMED: grab', (0, 255, 0)
+                            cv2.putText(view, txt, (8, view.shape[0] - 12),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, tcol, 2)
                     head = 'material'
                 else:
                     head = 'tag'
@@ -1045,21 +1918,52 @@ def main():
         frames += 1
         elapsed = time.time() - t0
         if elapsed >= 2.0:
-            # 线程跑着跑着死了（开完相机才崩的）也得说出来，别让人对着少一个窗口猜
-            for wk in alive:
-                if wk.error and wk.role not in dead_roles:
-                    dead_roles.add(wk.role)
-                    print(f'[相机] {wk.role} 相机中途挂了: {wk.error}')
-            cam_stat = '  '.join(f'{wk.role} {wk.stats()[0]:.1f}fps/{wk.stats()[1]:.0f}ms'
-                                 for wk in alive)
+            # 哪一路能用是**会变的**（线程每 CAM_RETRY_INTERVAL 秒重试一轮）：掉下去、
+            # 自己接上都在这里报一句，别让人对着黑窗口猜。没变就闭嘴，别每 2s 刷。
+            for wk in workers:
+                if wk.error != last_cam_err.get(wk.role):
+                    last_cam_err[wk.role] = wk.error
+                    if wk.error:
+                        print(f'[相机] {wk.role} 这一路现在是坏的: {wk.error}')
+                    else:
+                        print(f'[相机] {wk.role} 这一路恢复了，出帧了')
+            # 没起来的那路在状态行里也要一直看得见（不止那条 5 秒一次的提醒）
+            cam_stat = '  '.join((f'{wk.role} **没开起来**' if wk.error else
+                                  f'{wk.role} {wk.stats()[0]:.1f}fps/{wk.stats()[1]:.0f}ms')
+                                 for wk in workers)
             rx = ' '.join(f'{t:02X}:{n}' for t, n in sorted(link.rx_count.items()))
             st = (f'0x{state:02X} {STATE_CN.get(state, "?")}'
                   if state is not None and fresh else '未知')
-            # 等待颜色信息时把"圆稳了多久"打出来，不然光看它不发会以为是卡住了
+            # 等待抓取指令时把"圆稳了多久 / 离对准点还差多少"打出来，
+            # 不然光看它不发会以为是卡住了
             still = ''
-            if state == STATE_WAIT_COLOR:
+            if state == STATE_WAIT_GRAB:
                 held = now - still_since if still_since is not None else 0.0
                 still = f' 圆稳 {held:.1f}/{args.still_time:.1f}s'
+                if aim_err is not None:
+                    ex, ey = aim_err
+                    # 两个轴各自的容差：谁超了谁就要挪（框画在预览里）
+                    want = align_cmd_for(ex, ey, args.aim_tol_x, args.aim_tol_y)
+                    if want is not None:
+                        # 微调关着的时候这条只是情报：该往哪边挪写出来，但车不会动，
+                        # 圆停稳了照样抓（见 decide）
+                        still += f' 差 ({ex:+.0f},{ey:+.0f})px'
+                        if args.align_enable:
+                            # 把"卡在哪一步"写出来：等回 0x01 是正常节拍，
+                            # 停手 = 上一发没生效（对着协议 §七 查）
+                            if pacer.stuck:
+                                pace = '上一发没等到 0x01，这一站停手了'
+                            elif pacer.pending:
+                                pace = '正在走，等它回 0x01'
+                            elif args.align_max > 0 and pacer.count >= args.align_max:
+                                pace = f'发满 {args.align_max} 步，停手了 —— 照抓'
+                            else:
+                                pace = f'已发 {pacer.count} 步'
+                            still += f' 要挪{ADJUST_EN[want]}（{pace}）'
+                        else:
+                            still += '（微调关着，照抓）'
+                    else:
+                        still += ' **已对准**'
             print(f'[状态] 循环 {frames / elapsed:.1f}Hz  相机 {cam_stat}  '
                   f'下位机 {st}{still}  收到帧 {rx or "无"}')
             frames, t0 = 0, time.time()
