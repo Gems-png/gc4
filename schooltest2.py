@@ -87,7 +87,7 @@
    物料被抓走以后那个圆还在画面里，看着还是个同色的圆 —— 再抓一次就是空抓。
    所以真发过一次抓取就把那个颜色记下来，之后同色的圆**不再抓**；但**照样算"看到圆"**
    （停稳、对准照走，车不会因为滤掉一个圆去触发第 6 条的往前找），只是最后压住不发 0x02。
-   画面里还有别的没抓过的颜色时自动改抓那个（谁大抓谁）。**车自己跑到新的一站**
+   画面里还有别的没抓过的颜色时自动改抓那个（谁大抓谁）。**车自己跑到新的一次0x00**
    就清空重来（NudgePacer 的 'station' 事件：离开 0x01 超过 ALIGN_NEW_STOP_GAP 才
    回来 = 车真开走了一段路）。不能用"回到 0x01"当换站信号 —— 虽然协议 §四 里三次
    抓取全程都是 0x01（抓取本身不触发 'station'），但下一站不一定停在二维码点，
@@ -259,7 +259,7 @@ AIM_Y = 250                # （--aim-y）280 = 正中(240)再往下 40px。
 #   「走完一步：x 方向差 +190 → +12px（3cm ≈ 178px）」
 # 括号里就是 S，日志还会直接告诉你该填多少（S/2 再多一点）。
 # **两个方向的 S 不一定一样**（横移和前后走的距离标定各是各的），各量各的。
-AIM_TOL_X = 60             # （--aim-tol-x）左右容差，px
+AIM_TOL_X = 40             # （--aim-tol-x）左右容差，px
 AIM_TOL_Y = 25             # （--aim-tol-y）前后容差，px
 
 # 方向约定：画面**摆正之后**，画面上方 = 车头前方。
@@ -278,7 +278,7 @@ ALIGN_RETURN_TIMEOUT = 3.0 # 发完一发微调后，最多等这么久让它回
                            # 0.4~0.5 s，3 s 很宽裕。超时 = 这一发压根没生效
                            # （被门拒了 / 帧丢了），这一站就不再挪车 ——
                            # 不然会一直对着一个等不到的 0x01 空转
-ALIGN_NEW_STOP_GAP = 1.0   # 离开 0x01 超过这么久才回来 = 车自己跑到新的一站了
+ALIGN_NEW_STOP_GAP = 20.0   # 离开 0x01 超过这么久才回来 = 车自己跑到新的一站了
                            # （不是我们挪的那一下）。一发微调只让车走 0.3 s、
                            # 0x10 也就报 0.4~0.5 s，真跑一段路是好几秒 ——
                            # 用这个间隔把两者分开，好决定微调次数从哪重新算
@@ -1788,8 +1788,9 @@ def main():
                 # 上一站抓过的颜色重新可抓 —— 底下的定位圆跟着车走了，这一站是新的物料。
                 # 为什么要等这个事件、不等"回到 0x01"或者"报 0x00"，见 COLOR_POLICY
                 if grabbed_colors:
-                    print(f'[物料] 车跑到新的一站，颜色过滤清空（本来不抓：'
-                          f'{"、".join(COLOR_CN.get(c, str(c)) for c in sorted(grabbed_colors, key=str))}）')
+                    for _ in range(5):
+                        print(f'[物料] 车跑到新的一站，颜色过滤清空（本来不抓：'
+                            f'{"、".join(COLOR_CN.get(c, str(c)) for c in sorted(grabbed_colors, key=str))}）')
                     grabbed_colors.clear()
             elif ev == 'stuck':
                 print(f'[微调] 上一发发出去 {args.align_return_timeout:.0f}s 没等到下位机'
@@ -1828,9 +1829,11 @@ def main():
                         # 要和线上一样，不然桌面上测出来的行为对不上车
                         if skip_grabbed and target_color is not None \
                                 and target_color not in grabbed_colors:
+                            for color in grabbed_colors:
+                                print(f'[物料] 颜色过滤：{COLOR_CN.get(color, color)}色已抓过')
                             grabbed_colors.add(target_color)
-                            print(f'[物料] {COLOR_CN.get(target_color, target_color)}色记下了：'
-                                  f'同色的圆不再抓（车跑到新的一站时清空）')
+                            for _ in range(5):
+                                print(f'[物料] {COLOR_CN.get(target_color, target_color)}色记下了')
                     elif cmd == CMD_IDLE:
                         last_hb = now
                     elif cmd in ADJUST_CMDS:
