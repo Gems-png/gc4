@@ -6,7 +6,7 @@
 相机2识别tag，然后发给/cv/tag_recognize_topic，识别后就终止
 serial_comm 订阅话题，然后根据协议发给下危机
 
-数据链二：
+<!-- 数据链二：
 complete_flow节点的部分流程test
 订阅tag_recognize_topic(其他测试节点接受传入参数)
 根据状态调用grab_1 的 service
@@ -25,7 +25,16 @@ complete 收到grab反馈
 如果是放置在圆环内，和grab类似的操作
 如果是放置在托盘上
 要根据记忆调用plate，转来空盘
-然后completeflow发布关节角度话题和gripper话题
+然后completeflow发布关节角度话题和gripper话题 -->
+
+数据链路2的2.0
+grab1
+要抓指定颜色的物料，当然也可以不指定yanse
+先让机械臂移动到一个俯瞰的位置，大概0, 90, 90, 0（发给下危机的角度）
+直接发布到机械臂关节节点，给串口发送，然后
+暂时根据物料的圆形属性，调用maincam的circle服务
+等待正确的物料颜色，如果里画面中心太远，就把机械臂水平平移过去
+到差不多正中心，然后根据距离下降高度。这个圆是物料的底面圆，所以不会太高，只会底，这个没什么关系
 
 数据链三，手眼标定：
 serial得到电机坐标发布在real_joint_states

@@ -1,0 +1,4 @@
+detect{
+type: jointstate
+value: {0, 90, 90, 90}
+}
