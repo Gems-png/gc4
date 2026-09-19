@@ -2,7 +2,18 @@
 # -*- coding: utf-8 -*-
 """校赛测试脚本 2：tag 识别 + 物料（找圆）识别 + 0x20/0x21 握手
 
-基于校赛版本的 serial_tag.py，多了四件事：
+
+用法：
+    python3 schooltest2.py --list                  # 看这台机器上有哪些摄像头
+    python3 schooltest2.py                         # 默认两路都开，真发给下位机
+    python3 schooltest2.py --dev 'name:2M' --tag-dev 'name:Integrated'
+    python3 schooltest2.py --dev /dev/video0       # 也可以直接给节点
+    python3 schooltest2.py --tag-dev ''            # 只开物料相机
+    python3 schooltest2.py --dev '' --tag-dev 'name:Integrated'   # 只开 tag 相机
+    python3 schooltest2.py --width 1280 --height 720 --area 6000
+    python3 schooltest2.py --rx-log                # 把下位机发来的每一帧都打出来
+    python3 schooltest2.py --dry-run               # 只打印不发给下位机（默认是真发）
+
 
 1. **两路相机**：tag 和物料各一路，分别开、分别识别。
        tag 相机     -> QR 识别（车到停顿点之前就要认出来）
@@ -11,8 +22,8 @@
    派上现在：物料 = USB "2M"（/dev/video0），tag = USB "Integrated Webcam"（/dev/video2）。
 
 2. 设备**不写死 /dev/videoN**。N 是 USB 枚举顺序，插拔一次、上电顺序变一下就会漂
-   （这里就踩过：只有一台相机时 Integrated Webcam 是 video0，插上第二台它变成 video2）。
-   所以默认按**板卡名**匹配：'name:2M'、'name:Integrated'，名字是摄像头自己报的，不漂。
+   （这里就踩过：只有一台相机时 Integrated WebCam 是 video0，插上第二台它变成 video2）。
+   所以默认按**板卡名**匹配：'name:2M'、'name:Webcam'，名字是摄像头自己报的，不漂。
    也能直接给路径或 /dev/v4l/by-id 里的名字。--list 会把现在的节点和名字都打出来。
    UVC 摄像头一般 index0 = 取流节点、index1 = metadata，别开错。
    注意 /dev/video19 挂在 rpivid 下面是硬件解码器，不是相机。
@@ -114,16 +125,6 @@
    "车跑到新的一站"由 --align-new-stop-gap 判定，微调次数、抓过的颜色、tag 顺序
    都在这一个事件上重置 —— 那个间隔要卡在"抓取动作报的 0x10"和"真开走一段路"之间。
 
-用法：
-    python3 schooltest2.py --list                  # 看这台机器上有哪些摄像头
-    python3 schooltest2.py                         # 默认两路都开，真发给下位机
-    python3 schooltest2.py --dev 'name:2M' --tag-dev 'name:Integrated'
-    python3 schooltest2.py --dev /dev/video0       # 也可以直接给节点
-    python3 schooltest2.py --tag-dev ''            # 只开物料相机
-    python3 schooltest2.py --dev '' --tag-dev 'name:Integrated'   # 只开 tag 相机
-    python3 schooltest2.py --width 1280 --height 720 --area 6000
-    python3 schooltest2.py --rx-log                # 把下位机发来的每一帧都打出来
-    python3 schooltest2.py --dry-run               # 只打印不发给下位机（默认是真发）
 """
 
 import argparse
@@ -195,7 +196,7 @@ MAT_AUTO_EXPOSURE = 'manual'  # 'manual'=设成手动 / 'auto'=设成自动 / No
                               # 注：这颗模组上两种一个样（见上面实测），留着是给别款相机用的
 MAT_HUE = 0                   # 色相，-2000~2000，出厂 0。钉死到 0 是为了 PC 和车上
                               # 看到同一个颜色（--hue）。**在 PC 上调 HSV 表之前先确认这行是 0**
-MAT_BRIGHTNESS = -48          # 亮度，-64~64，驱动默认 0。**唯一真旋钮**，1 格 ≈ 1 个 V（--brightness）
+MAT_BRIGHTNESS = -40          # 亮度，-64~64，驱动默认 0。**唯一真旋钮**，1 格 ≈ 1 个 V（--brightness）
 MAT_GAIN = None               # 增益。这颗模组没暴露 gain 控制，填了也是静默失败（会打"没设上"）
 MAT_EXPOSURE = None           # 曝光(绝对)。**在这颗模组上是死的**，填了没用，留着是为了别款相机
 
