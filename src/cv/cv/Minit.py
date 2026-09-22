@@ -55,7 +55,16 @@ def find_dev(name_fragment, index=0):
     return os.path.realpath(pref[0] if pref else hits[0])
 
 
-def open_cap(name_fragment, width=640, height=480, fps=15.0, fourcc='MJPG'):
+# ---- 默认参数：换相机 / 换分辨率只改这里，调用方 open_cap('2M') 一个字都不用动 ----
+# 别的模块要引用"相机默认分辨率/帧率"时也从这里取（比如 MainCam 的合成图），
+# 别再各写一份 640x480 —— 那就是同一个旋钮两处能改。
+DEFAULT_SIZE = (640, 480)      # (宽, 高)
+DEFAULT_FPS = 15.0
+DEFAULT_FOURCC = 'MJPG'
+
+
+def open_cap(name_fragment, width=DEFAULT_SIZE[0], height=DEFAULT_SIZE[1],
+             fps=DEFAULT_FPS, fourcc=DEFAULT_FOURCC):
     """输入板卡名片段，直接返回已打开的 cv2.VideoCapture；失败返回 None。
 
     用法：
