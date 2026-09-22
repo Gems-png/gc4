@@ -53,28 +53,22 @@ def generate_launch_description():
           DeclareLaunchArgument('port', default_value='/dev/ttyUSB0',
                                    description='串口设备路径（仅 serial_sim:=false 时有效）'),
 
-          # ---- 图像来源 ----
-          Node(package='cv', executable='tag_image_pub', name='tag_image_pub',
-               condition=IfCondition(PythonExpression(["'", use_sim, "' == 'true'"])),
-               output='screen'),
-          Node(package='cv', executable='raw_image_pub', name='raw_image_pub',
-               condition=IfCondition(PythonExpression(["'", use_sim, "' == 'false'"])),
+          # ---- 图像来源 + tag 位姿: 收敛为 MainCam 单节点 ----
+          # use_sim:=true  -> 发布合成 AprilTag 图像 (原 tag_image_pub 功能)
+          # use_sim:=false -> 直驱真实摄像头 (原 raw_image_pub 功能)
+          # pose_method 默认 pnp, 对应原 tag_pose 全位姿解算 (卡尔曼滤波 + TF)
+          Node(package='cv', executable='main_cam', name='main_cam',
                parameters=[{
+                    'use_sim': use_sim,
                     'camera_id': camera_id,
                     'width': width,
                     'height': height,
                     'freq': freq,
-                    # 'frame_id' 可保持默认 'camera_frame'，如果需要也可添加参数
+                    'calib_file': calib_file,
+                    'frame_id': 'tag_world',
+                    'pose_method': 'pnp',
                }],
                output='screen'),
-
-          # ---- tag 检测 -> 发布目标坐标 /goal_position ----
-          Node(package='cv', executable='tag_pose', name='tag_pose',
-               parameters=[{'calib_file': calib_file}],
-               output='screen',
-               # ↓↓↓ 添加这一行，仅提升该节点的日志级别 ↓↓↓
-               arguments=['--ros-args', '--log-level', 'tag_pose:=DEBUG']
-          ),
 
           # ---- IK 逆解 -> 发布关节角 /joint_states ----
           Node(package='myik', executable='my_ik_node', name='my_ik_node',

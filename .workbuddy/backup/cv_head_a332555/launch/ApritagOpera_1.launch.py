@@ -72,24 +72,44 @@ def generate_launch_description():
           DeclareLaunchArgument('tag_id', default_value='1',
                                    description='要跟踪的 AprilTag ID <0 表示跟踪最大那个'),
 
-          # ---- 图像来源 + tag 位姿: 收敛为 MainCam 单节点 ----
-          # use_sim:=true  -> 发布合成 AprilTag 图像 (原 tag_image_pub 功能)
-          # use_sim:=false -> 直驱真实摄像头 (原 raw_image_pub / usb_cam 功能)
-          # pose_method 默认 similar, 对应原 cam_pos 相似三角形测距
-          Node(package='cv', executable='main_cam', name='main_cam',
+          # ---- 图像来源 ----
+          Node(package='cv', executable='Apriltag_image_pub', name='tag_image_pub',
+               condition=IfCondition(PythonExpression(["'", use_sim, "' == 'true'"])),
+               output='screen'),
+          # 原自定义 raw_image_pub 节点，现替换为 ROS2 官方 usb_cam 节点（保留原代码作为注释）
+          # Node(package='cv', executable='raw_image_pub', name='raw_image_pub',
+          #      condition=IfCondition(PythonExpression(["'", use_sim, "' == 'false'"])),
+          #      parameters=[{
+          #           'camera_id': camera_id,
+          #           'width': width,
+          #           'height': height,
+          #           'freq': freq,
+          #      }],
+          #      output='screen'),
+          # 使用 usb_cam 节点驱动真实摄像头（支持硬件压缩和更多参数）
+          Node(package='usb_cam', executable='usb_cam_node_exe', name='usb_cam',
+               condition=IfCondition(PythonExpression(["'", use_sim, "' == 'false'"])),
                parameters=[{
-                    'use_sim': use_sim,
-                    'camera_id': camera_id,
-                    'width': width,
-                    'height': height,
-                    'freq': freq,
+                    'video_device': PythonExpression(["'/dev/video' + '", camera_id, "'"]),
+                    'pixel_format': 'mjpeg2rgb',
+                    'image_width': width,
+                    'image_height': height,
+                    'framerate': freq,
+                    'camera_name': '',   # 不加前缀
+               }],
+               remappings=[('/image_raw', '/camera/image_raw')],
+               output='screen'),
+
+          # ---- tag 检测 -> 相似三角形测距 -> 发布 /goal_position ----
+          Node(package='cv', executable='Apriltag_pose', name='cam_pos',
+               parameters=[{
                     'calib_file': calib_file,
                     'tag_size_mm': tag_size,
                     'tag_id': tag_id,
                     'frame_id': 'camera_frame',
-                    'pose_method': 'similar',
                }],
-               output='screen'),
+               output='screen',
+               arguments=['--ros-args', '--log-level', 'cam_pos:=DEBUG']),
 
           # ---- IK 逆解 -> 发布关节角 /joint_states ----
           Node(package='myik', executable='my_ik_node', name='my_ik_node',

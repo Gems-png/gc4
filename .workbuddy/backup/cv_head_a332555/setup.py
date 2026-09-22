@@ -27,8 +27,13 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            "main_cam=cv.MainCam:main",
-            "tag_cam=cv.tag_recognize:main",
+            "raw_image_pub=cv.raw_image_pub:main",
+            "tag_pose=cv.Apriltag_pose:main",
+            "cam_pos=cv.cam_pos:main",
+            "tag_image_pub=cv.Apriltag_image_pub:main",
+            "HECal=cv.HECal:main",
+            "circle=cv.circle:main",
+            "tag_image_pub=cv.Apriltag_image_pub:main",
         ],
     },
 )
