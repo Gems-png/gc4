@@ -125,7 +125,7 @@ class MainCam(Node):
             # 暂时不生成物料的合成图, 仅 AprilTag，因为ai不给我搞
             self.get_logger().info('MainCam 启动 (仿真模式): 发布合成 AprilTag 图像')
         else:
-            self.cap = self.open_cap(f'video{camera_id}', self.width, self.height, self.freq)
+            self.cap = self.open_cap('2M')
             self.get_logger().info(f'MainCam 启动: 摄像头 {camera_id}, '
                                    f'位姿方法={self.pose_method}')
 
